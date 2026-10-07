@@ -36,12 +36,12 @@ export const UserAuthModal: React.FC<UserAuthModalProps> = ({ isOpen, onClose })
     setAuthError('');
   };
 
-  const handleSubmitLogin = (e: React.FormEvent) => {
+  const handleSubmitLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
     
     if (mode === 'CREATE') {
-      const res = register(usernameInput, passwordInput);
+      const res = await register(usernameInput, passwordInput);
       if (res.success) {
         setUsernameInput('');
         setPasswordInput('');
@@ -52,7 +52,7 @@ export const UserAuthModal: React.FC<UserAuthModalProps> = ({ isOpen, onClose })
       }
     } else {
       const targetUser = selectedUser || usernameInput.trim();
-      const res = login(targetUser, passwordInput);
+      const res = await login(targetUser, passwordInput);
       if (res.success) {
         setUsernameInput('');
         setPasswordInput('');

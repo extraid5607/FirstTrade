@@ -45,9 +45,10 @@ export const AccountTab: React.FC<AccountTabProps> = ({
       setIsAvailable(null);
       return;
     }
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
       if (usernameInput.trim().length >= 3) {
-        setIsAvailable(isUsernameAvailable(usernameInput.trim()));
+        const avail = await isUsernameAvailable(usernameInput.trim());
+        setIsAvailable(avail);
       } else {
         setIsAvailable(null);
       }
@@ -55,13 +56,13 @@ export const AccountTab: React.FC<AccountTabProps> = ({
     return () => clearTimeout(timer);
   }, [usernameInput, authMode, isUsernameAvailable]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
     setSuccessMessage('');
 
     if (authMode === 'SIGNUP') {
-      const res = register(usernameInput, passwordInput);
+      const res = await register(usernameInput, passwordInput);
       if (res.success) {
         setSuccessMessage(`Account created successfully! Welcome ${usernameInput}`);
         setUsernameInput('');
@@ -70,7 +71,7 @@ export const AccountTab: React.FC<AccountTabProps> = ({
         setErrorMessage(res.message || 'Failed to create account');
       }
     } else {
-      const res = login(usernameInput, passwordInput);
+      const res = await login(usernameInput, passwordInput);
       if (res.success) {
         setSuccessMessage('Logged in successfully!');
         setUsernameInput('');

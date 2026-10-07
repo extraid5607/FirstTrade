@@ -43,86 +43,73 @@ export function useTradeStore(username?: string) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Load from localStorage when mounted or when username changes
+  // Load from Cloud Redis (with localStorage immediate cache) when username changes
   useEffect(() => {
     setIsLoaded(false);
-    try {
+    let isCancelled = false;
+
+    async function loadTrades() {
+      // 1. Immediate local cache fallback
       const balanceKey = getStorageKey('balance', username);
       const positionsKey = getStorageKey('positions', username);
       const ordersKey = getStorageKey('orders', username);
 
-      // If user specific data doesn't exist yet, check global key for migration fallback
-      let storedBalance = localStorage.getItem(balanceKey);
-      let storedPositions = localStorage.getItem(positionsKey);
-      let storedOrders = localStorage.getItem(ordersKey);
+      const localBal = localStorage.getItem(balanceKey);
+      const localPos = localStorage.getItem(positionsKey);
+      const localOrd = localStorage.getItem(ordersKey);
 
-      if (!storedBalance && !username) {
-        storedBalance = localStorage.getItem('first_trade_balance');
-      }
-      if (!storedPositions && !username) {
-        storedPositions = localStorage.getItem('first_trade_positions');
-      }
-      if (!storedOrders && !username) {
-        storedOrders = localStorage.getItem('first_trade_orders');
+      if (localBal) setBalance(JSON.parse(localBal));
+      if (localPos) setPositions(JSON.parse(localPos));
+      if (localOrd) setOrders(JSON.parse(localOrd));
+
+      // 2. Fetch latest synced data from Cloud Upstash Redis
+      if (username) {
+        try {
+          const res = await fetch(`/api/user/trades?username=${encodeURIComponent(username)}`);
+          if (res.ok && !isCancelled) {
+            const data = await res.json();
+            if (data.balance !== undefined) setBalance(data.balance);
+            if (data.positions) {
+              const validPos = data.positions.filter((p: Position) => {
+                if (p.status === 'CLOSED') return isToday(p.closedAt || p.openedAt);
+                return true;
+              }).map((p: Position) => {
+                if (p.segment === 'OPTION' && p.contractDetails && (!p.contractDetails.expiryDate || p.contractDetails.expiryDate === 'CURRENT')) {
+                  return {
+                    ...p,
+                    contractDetails: {
+                      ...p.contractDetails,
+                      expiryDate: getDefaultExpiry(p.symbol)
+                    }
+                  };
+                }
+                return p;
+              });
+              setPositions(validPos);
+            }
+            if (data.orders) {
+              const validOrd = data.orders.filter((o: Order) => isToday(o.timestamp));
+              setOrders(validOrd);
+            }
+          }
+        } catch (e) {
+          console.error('Failed to sync from cloud Redis', e);
+        }
       }
 
-      setBalance(storedBalance ? JSON.parse(storedBalance) : INITIAL_DEMO_CAPITAL);
-      
-      if (storedPositions) {
-        const rawPositions: Position[] = JSON.parse(storedPositions);
-        // Only keep OPEN positions and CLOSED positions from today
-        const validPositions = rawPositions.filter(p => {
-          if (p.status === 'CLOSED') {
-            return isToday(p.closedAt || p.openedAt);
-          }
-          return true; // Keep open positions
-        }).map(p => {
-          if (p.segment === 'OPTION' && p.contractDetails && (!p.contractDetails.expiryDate || p.contractDetails.expiryDate === 'CURRENT')) {
-            return {
-              ...p,
-              contractDetails: {
-                ...p.contractDetails,
-                expiryDate: getDefaultExpiry(p.symbol)
-              }
-            };
-          }
-          return p;
-        });
-        setPositions(validPositions);
-      } else {
-        setPositions([]);
+      if (!isCancelled) {
+        setIsLoaded(true);
       }
-
-      if (storedOrders) {
-        const rawOrders: Order[] = JSON.parse(storedOrders);
-        // Only keep orders from today
-        const validOrders = rawOrders.filter(o => isToday(o.timestamp)).map(o => {
-          if (o.segment === 'OPTION' && o.contractDetails && (!o.contractDetails.expiryDate || o.contractDetails.expiryDate === 'CURRENT')) {
-            return {
-              ...o,
-              contractDetails: {
-                ...o.contractDetails,
-                expiryDate: getDefaultExpiry(o.symbol)
-              }
-            };
-          }
-          return o;
-        });
-        setOrders(validOrders);
-      } else {
-        setOrders([]);
-      }
-    } catch (e) {
-      console.error('Failed to load trades from storage', e);
-      setBalance(INITIAL_DEMO_CAPITAL);
-      setPositions([]);
-      setOrders([]);
-    } finally {
-      setIsLoaded(true);
     }
+
+    loadTrades();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [username]);
 
-  // Save to localStorage when state changes
+  // Save to localStorage & Cloud Redis when state changes
   useEffect(() => {
     if (!isLoaded) return;
     try {
@@ -133,8 +120,22 @@ export function useTradeStore(username?: string) {
       localStorage.setItem(balanceKey, JSON.stringify(balance));
       localStorage.setItem(positionsKey, JSON.stringify(positions));
       localStorage.setItem(ordersKey, JSON.stringify(orders));
+
+      // Push to Cloud Upstash Redis
+      if (username) {
+        fetch('/api/user/trades', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username,
+            balance,
+            positions,
+            orders,
+          }),
+        }).catch(err => console.error('Cloud Redis save error', err));
+      }
     } catch (e) {
-      console.error('Failed to save trades to storage', e);
+      console.error('Failed to save trades', e);
     }
   }, [balance, positions, orders, isLoaded, username]);
 

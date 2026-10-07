@@ -10,17 +10,15 @@ export interface UserProfile {
 interface AuthContextType {
   currentUser: UserProfile | null;
   usersList: string[];
-  register: (username: string, password: string) => { success: boolean; message?: string };
-  login: (username: string, password: string) => { success: boolean; message?: string };
+  register: (username: string, password: string) => Promise<{ success: boolean; message?: string }>;
+  login: (username: string, password: string) => Promise<{ success: boolean; message?: string }>;
   logout: () => void;
-  deleteAccount: (username: string) => void;
-  isUsernameAvailable: (username: string) => boolean;
+  deleteAccount: (username: string) => Promise<void>;
+  isUsernameAvailable: (username: string) => Promise<boolean>;
 }
 
 const STORAGE_KEY_AUTH_USER = 'first_trade_current_user';
-const STORAGE_KEY_USERS_REGISTRY = 'first_trade_users_registry';
 
-// Deterministic pleasant gradient colors for user avatars
 const AVATAR_COLORS = [
   'from-emerald-500 to-teal-600',
   'from-blue-500 to-indigo-600',
@@ -42,67 +40,70 @@ function getAvatarColor(name: string): string {
 const AuthContext = createContext<AuthContextType>({
   currentUser: null,
   usersList: [],
-  register: () => ({ success: false }),
-  login: () => ({ success: false }),
+  register: async () => ({ success: false }),
+  login: async () => ({ success: false }),
   logout: () => {},
-  deleteAccount: () => {},
-  isUsernameAvailable: () => true,
+  deleteAccount: async () => {},
+  isUsernameAvailable: async () => true,
 });
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [usersList, setUsersList] = useState<string[]>([]);
-  const [isLoaded, setIsLoaded] = useState(false);
 
-  // Load session from localStorage on mount
-  useEffect(() => {
+  // 1. Fetch registered users from cloud Redis on mount
+  const syncUsersList = useCallback(async () => {
     try {
-      const savedUser = localStorage.getItem(STORAGE_KEY_AUTH_USER);
-      const registryRaw = localStorage.getItem(STORAGE_KEY_USERS_REGISTRY);
-
-      const registry: Record<string, string> = registryRaw ? JSON.parse(registryRaw) : {};
-      const usernames = Object.keys(registry);
-      setUsersList(usernames);
-
-      if (savedUser) {
-        const parsed = JSON.parse(savedUser);
-        if (parsed?.username && registry[parsed.username] !== undefined) {
-          setCurrentUser({
-            username: parsed.username,
-            avatarColor: getAvatarColor(parsed.username)
-          });
-        } else {
-          // Cleared or deleted
-          localStorage.removeItem(STORAGE_KEY_AUTH_USER);
-          setCurrentUser(null);
+      const res = await fetch('/api/user/auth');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.users) {
+          setUsersList(data.users);
         }
       }
     } catch (e) {
-      console.error('Failed to load auth info', e);
-    } finally {
-      setIsLoaded(true);
+      console.error('Failed to fetch users from cloud', e);
     }
   }, []);
 
-  const isUsernameAvailable = useCallback((username: string): boolean => {
-    const trimmed = username.trim().toLowerCase();
-    if (!trimmed) return false;
+  useEffect(() => {
+    // Load local active session
     try {
-      const registryRaw = localStorage.getItem(STORAGE_KEY_USERS_REGISTRY);
-      const registry: Record<string, string> = registryRaw ? JSON.parse(registryRaw) : {};
-      const existing = Object.keys(registry).map(u => u.toLowerCase());
-      return !existing.includes(trimmed);
+      const savedUser = localStorage.getItem(STORAGE_KEY_AUTH_USER);
+      if (savedUser) {
+        const parsed = JSON.parse(savedUser);
+        if (parsed?.username) {
+          setCurrentUser({
+            username: parsed.username,
+            avatarColor: getAvatarColor(parsed.username),
+          });
+        }
+      }
+    } catch {}
+
+    syncUsersList();
+  }, [syncUsersList]);
+
+  // Check unique username availability via Cloud Redis
+  const isUsernameAvailable = useCallback(async (username: string): Promise<boolean> => {
+    const trimmed = username.trim();
+    if (!trimmed || trimmed.length < 3) return false;
+    try {
+      const res = await fetch(`/api/user/auth?check=${encodeURIComponent(trimmed)}`);
+      if (res.ok) {
+        const data = await res.json();
+        return !!data.available;
+      }
+      return true;
     } catch {
       return true;
     }
   }, []);
 
-  const register = useCallback((username: string, password: string): { success: boolean; message?: string } => {
+  // Register in Cloud Redis
+  const register = useCallback(async (username: string, password: string): Promise<{ success: boolean; message?: string }> => {
     const trimmed = username.trim();
-    if (!trimmed) {
-      return { success: false, message: 'Please enter a valid User ID' };
-    }
-    if (trimmed.length < 3) {
+    if (!trimmed || trimmed.length < 3) {
       return { success: false, message: 'User ID must be at least 3 characters' };
     }
     if (!password || password.length < 4) {
@@ -110,59 +111,54 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     try {
-      const registryRaw = localStorage.getItem(STORAGE_KEY_USERS_REGISTRY);
-      const registry: Record<string, string> = registryRaw ? JSON.parse(registryRaw) : {};
+      const res = await fetch('/api/user/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'REGISTER', username: trimmed, password }),
+      });
 
-      // Check if User ID is already taken (case-insensitive check)
-      const existingKeys = Object.keys(registry);
-      const isTaken = existingKeys.some(k => k.toLowerCase() === trimmed.toLowerCase());
-      if (isTaken) {
-        return { success: false, message: `User ID '${trimmed}' is already taken. Please choose another.` };
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, message: data.error || 'Failed to create account' };
       }
 
-      // Store in registry
-      registry[trimmed] = password;
-      localStorage.setItem(STORAGE_KEY_USERS_REGISTRY, JSON.stringify(registry));
-      setUsersList(Object.keys(registry));
-
       const profile: UserProfile = {
-        username: trimmed,
-        avatarColor: getAvatarColor(trimmed),
+        username: data.username || trimmed,
+        avatarColor: getAvatarColor(data.username || trimmed),
       };
 
       localStorage.setItem(STORAGE_KEY_AUTH_USER, JSON.stringify(profile));
       setCurrentUser(profile);
+      await syncUsersList();
       return { success: true };
     } catch (e) {
       console.error('Registration failed', e);
-      return { success: false, message: 'Failed to save account' };
+      return { success: false, message: 'Failed to connect to cloud database' };
     }
-  }, []);
+  }, [syncUsersList]);
 
-  const login = useCallback((username: string, password: string): { success: boolean; message?: string } => {
+  // Login via Cloud Redis
+  const login = useCallback(async (username: string, password: string): Promise<{ success: boolean; message?: string }> => {
     const trimmed = username.trim();
     if (!trimmed) {
       return { success: false, message: 'Please enter your User ID' };
     }
 
     try {
-      const registryRaw = localStorage.getItem(STORAGE_KEY_USERS_REGISTRY);
-      const registry: Record<string, string> = registryRaw ? JSON.parse(registryRaw) : {};
+      const res = await fetch('/api/user/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'LOGIN', username: trimmed, password }),
+      });
 
-      // Find exact or case-insensitive match
-      const matchedKey = Object.keys(registry).find(k => k.toLowerCase() === trimmed.toLowerCase());
-
-      if (!matchedKey) {
-        return { success: false, message: `User ID '${trimmed}' not found. Please create an account first.` };
-      }
-
-      if (registry[matchedKey] !== password) {
-        return { success: false, message: 'Incorrect password. Please try again.' };
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, message: data.error || 'Failed to login' };
       }
 
       const profile: UserProfile = {
-        username: matchedKey,
-        avatarColor: getAvatarColor(matchedKey),
+        username: data.username || trimmed,
+        avatarColor: getAvatarColor(data.username || trimmed),
       };
 
       localStorage.setItem(STORAGE_KEY_AUTH_USER, JSON.stringify(profile));
@@ -170,7 +166,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: true };
     } catch (e) {
       console.error('Login failed', e);
-      return { success: false, message: 'Failed to login' };
+      return { success: false, message: 'Failed to connect to cloud database' };
     }
   }, []);
 
@@ -179,30 +175,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setCurrentUser(null);
   }, []);
 
-  const deleteAccount = useCallback((username: string) => {
+  const deleteAccount = useCallback(async (username: string) => {
     try {
-      const registryRaw = localStorage.getItem(STORAGE_KEY_USERS_REGISTRY);
-      const registry: Record<string, string> = registryRaw ? JSON.parse(registryRaw) : {};
-      
-      const matchedKey = Object.keys(registry).find(k => k.toLowerCase() === username.toLowerCase());
-      if (matchedKey) {
-        delete registry[matchedKey];
-        localStorage.setItem(STORAGE_KEY_USERS_REGISTRY, JSON.stringify(registry));
-        setUsersList(Object.keys(registry));
+      await fetch('/api/user/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'DELETE', username }),
+      });
 
-        // Remove trade data for this user
-        localStorage.removeItem(`first_trade_${matchedKey}_balance`);
-        localStorage.removeItem(`first_trade_${matchedKey}_positions`);
-        localStorage.removeItem(`first_trade_${matchedKey}_orders`);
-
-        if (currentUser?.username.toLowerCase() === matchedKey.toLowerCase()) {
-          logout();
-        }
+      if (currentUser?.username.toLowerCase() === username.toLowerCase()) {
+        logout();
       }
+      await syncUsersList();
     } catch (e) {
       console.error('Failed to delete account', e);
     }
-  }, [currentUser, logout]);
+  }, [currentUser, logout, syncUsersList]);
 
   return (
     <AuthContext.Provider value={{ 
