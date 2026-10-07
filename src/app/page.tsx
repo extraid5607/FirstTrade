@@ -8,19 +8,20 @@ import { OptionChainTable } from '@/components/OptionChainTable';
 import { PositionsTable } from '@/components/PositionsTable';
 import { OrderBook } from '@/components/OrderBook';
 import { OrderPadModal } from '@/components/OrderPadModal';
+import { AccountTab } from '@/components/AccountTab';
 import { MobileNav, MobileTab } from '@/components/MobileNav';
 import { useTradeStore } from '@/lib/tradeStore';
 import { useAuth } from '@/lib/authContext';
 import { Quote } from '@/types/market';
 import { TradingSegment, OrderSide } from '@/types/trading';
-import { BarChart2, Layers, Briefcase, Clock, ShieldCheck, Zap, ArrowLeft } from 'lucide-react';
+import { BarChart2, Layers, Briefcase, Clock, ShieldCheck, Zap, ArrowLeft, User } from 'lucide-react';
 
 export default function TerminalPage() {
   const { currentUser } = useAuth();
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [selectedSymbol, setSelectedSymbol] = useState<string>('NIFTY');
   const [centerView, setCenterView] = useState<'CHART' | 'OPTIONS'>('CHART');
-  const [bottomTab, setBottomTab] = useState<'POSITIONS' | 'ORDERS'>('POSITIONS');
+  const [bottomTab, setBottomTab] = useState<'POSITIONS' | 'ORDERS' | 'ACCOUNT'>('POSITIONS');
   const [mobileTab, setMobileTab] = useState<MobileTab>('WATCHLIST');
 
   // Navigation & Back tracking refs
@@ -220,6 +221,14 @@ export default function TerminalPage() {
     lotSize?: number,
     initialPrice?: number
   ) => {
+    // Enforce that user must create User ID & password account before trading
+    if (!currentUser) {
+      alert('Please create a User ID and password in the Account tab first before trading!');
+      setBottomTab('ACCOUNT');
+      navigateToTab('ACCOUNT');
+      return;
+    }
+
     setSelectedSymbol(symbol);
     setOrderPadInitial({
       symbol,
@@ -353,6 +362,15 @@ export default function TerminalPage() {
                   <Clock className="w-3 h-3 text-amber-600 dark:text-amber-400" />
                   <span>Orders ({orders.length})</span>
                 </button>
+                <button
+                  onClick={() => setBottomTab('ACCOUNT')}
+                  className={`px-3 py-1 text-xs font-bold rounded-md transition-colors flex items-center gap-1.5 ${
+                    bottomTab === 'ACCOUNT' ? 'bg-slate-200/80 dark:bg-[#1E2536] text-slate-900 dark:text-white' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <User className="w-3 h-3 text-purple-500" />
+                  <span>Account {currentUser ? `(${currentUser.username})` : '(Login/Sign Up)'}</span>
+                </button>
               </div>
 
               {/* Unrealized P&L quick pill */}
@@ -367,14 +385,22 @@ export default function TerminalPage() {
             </div>
 
             <div className="flex-1 overflow-hidden">
-              {bottomTab === 'POSITIONS' ? (
+              {bottomTab === 'POSITIONS' && (
                 <PositionsTable
                   positions={positions}
                   onClosePosition={closePosition}
                   onCloseAllPositions={closeAllPositions}
                 />
-              ) : (
+              )}
+              {bottomTab === 'ORDERS' && (
                 <OrderBook orders={orders} onCancelOrder={cancelOrder} />
+              )}
+              {bottomTab === 'ACCOUNT' && (
+                <AccountTab
+                  portfolio={portfolio}
+                  onResetAccount={resetAccount}
+                  onNavigateToWatchlist={() => setBottomTab('POSITIONS')}
+                />
               )}
             </div>
           </section>
@@ -400,6 +426,7 @@ export default function TerminalPage() {
                 {mobileTab === 'OPTIONS' && `${selectedSymbol} Option Chain`}
                 {mobileTab === 'POSITIONS' && 'Positions'}
                 {mobileTab === 'ORDERS' && 'Order Book'}
+                {mobileTab === 'ACCOUNT' && 'Account'}
               </span>
               {mobileTab === 'CHART' && currentQuote?.ltp && (
                 <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/15 text-[#00D09C] font-mono font-bold">
@@ -462,8 +489,18 @@ export default function TerminalPage() {
           </div>
         )}
 
+        {mobileTab === 'ACCOUNT' && (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <AccountTab
+              portfolio={portfolio}
+              onResetAccount={resetAccount}
+              onNavigateToWatchlist={() => navigateToTab('WATCHLIST')}
+            />
+          </div>
+        )}
+
         {/* Mobile Floating Action Button (Trade) */}
-        {mobileTab !== 'POSITIONS' && mobileTab !== 'ORDERS' && (
+        {mobileTab !== 'POSITIONS' && mobileTab !== 'ORDERS' && mobileTab !== 'ACCOUNT' && (
           <div className="fixed bottom-16 right-4 z-30">
             <button
               onClick={() => handleOpenOrderPad(selectedSymbol, 'BUY', currentQuote.segment === 'INDEX' ? 'OPTION' : 'EQUITY')}

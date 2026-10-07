@@ -1,9 +1,9 @@
 'use client';
 
 import React from 'react';
-import { List, BarChart2, Layers, Briefcase, Clock } from 'lucide-react';
+import { List, BarChart2, Layers, Briefcase, Clock, User } from 'lucide-react';
 
-export type MobileTab = 'WATCHLIST' | 'CHART' | 'OPTIONS' | 'POSITIONS' | 'ORDERS';
+export type MobileTab = 'WATCHLIST' | 'CHART' | 'OPTIONS' | 'POSITIONS' | 'ORDERS' | 'ACCOUNT';
 
 interface MobileNavProps {
   activeTab: MobileTab;
@@ -17,16 +17,17 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   openPositionsCount,
 }) => {
   const tabs: { id: MobileTab; label: string; icon: React.ReactNode; badge?: number }[] = [
-    { id: 'WATCHLIST', label: 'Watchlist', icon: <List className="w-5 h-5" /> },
-    { id: 'CHART', label: 'Chart', icon: <BarChart2 className="w-5 h-5" /> },
-    { id: 'OPTIONS', label: 'Options', icon: <Layers className="w-5 h-5" /> },
-    { id: 'POSITIONS', label: 'Positions', icon: <Briefcase className="w-5 h-5" />, badge: openPositionsCount },
-    { id: 'ORDERS', label: 'Orders', icon: <Clock className="w-5 h-5" /> },
+    { id: 'WATCHLIST', label: 'Watchlist', icon: <List className="w-4 h-4" /> },
+    { id: 'CHART', label: 'Chart', icon: <BarChart2 className="w-4 h-4" /> },
+    { id: 'OPTIONS', label: 'Options', icon: <Layers className="w-4 h-4" /> },
+    { id: 'POSITIONS', label: 'Positions', icon: <Briefcase className="w-4 h-4" />, badge: openPositionsCount },
+    { id: 'ORDERS', label: 'Orders', icon: <Clock className="w-4 h-4" /> },
+    { id: 'ACCOUNT', label: 'Account', icon: <User className="w-4 h-4" /> },
   ];
 
   return (
     <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-[#0E121A]/95 backdrop-blur-md border-t border-slate-200 dark:border-[#1E2430] pb-[env(safe-area-inset-bottom)] transition-colors">
-      <div className="grid grid-cols-5 h-14">
+      <div className="grid grid-cols-6 h-14">
         {tabs.map((tab) => {
           const isActive = activeTab === tab.id;
           return (

@@ -22,7 +22,7 @@ interface UserAuthModalProps {
 }
 
 export const UserAuthModal: React.FC<UserAuthModalProps> = ({ isOpen, onClose }) => {
-  const { currentUser, usersList, login, logout, deleteAccount } = useAuth();
+  const { currentUser, usersList, register, login, logout, deleteAccount } = useAuth();
   const [mode, setMode] = useState<'SELECT' | 'CREATE'>('SELECT');
   const [usernameInput, setUsernameInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
@@ -39,21 +39,28 @@ export const UserAuthModal: React.FC<UserAuthModalProps> = ({ isOpen, onClose })
   const handleSubmitLogin = (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
-    const targetUser = mode === 'CREATE' ? usernameInput.trim() : selectedUser;
     
-    if (!targetUser) {
-      setAuthError('Please enter a username');
-      return;
-    }
-
-    const success = login(targetUser, passwordInput);
-    if (success) {
-      setUsernameInput('');
-      setPasswordInput('');
-      setSelectedUser('');
-      onClose();
+    if (mode === 'CREATE') {
+      const res = register(usernameInput, passwordInput);
+      if (res.success) {
+        setUsernameInput('');
+        setPasswordInput('');
+        setSelectedUser('');
+        onClose();
+      } else {
+        setAuthError(res.message || 'Failed to create user');
+      }
     } else {
-      setAuthError('Incorrect password for this user');
+      const targetUser = selectedUser || usernameInput.trim();
+      const res = login(targetUser, passwordInput);
+      if (res.success) {
+        setUsernameInput('');
+        setPasswordInput('');
+        setSelectedUser('');
+        onClose();
+      } else {
+        setAuthError(res.message || 'Incorrect password');
+      }
     }
   };
 
