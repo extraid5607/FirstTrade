@@ -53,8 +53,108 @@ export const OrderBook: React.FC<OrderBookProps> = ({
         </div>
       </div>
 
-      {/* Orders List */}
-      <div className="flex-1 overflow-x-auto overflow-y-auto">
+      {/* MOBILE VIEW (< md): Zerodha/Groww style dedicated order cards */}
+      <div className="md:hidden flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-[#171C26] pb-16">
+        {filteredOrders.map((order) => {
+          const timeStr = new Date(order.timestamp).toLocaleTimeString('en-IN', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+          });
+
+          const isOption = order.segment === 'OPTION' && !!order.contractDetails?.strikePrice;
+          const expBadge = isOption ? formatExpiryBadge(order.contractDetails?.expiryDate, order.symbol) : '';
+          const expFull = isOption ? formatExpiryFull(order.contractDetails?.expiryDate, order.symbol) : '';
+
+          const instrumentTitle = order.contractDetails?.optionType
+            ? `${order.symbol} ${order.contractDetails.strikePrice} ${order.contractDetails.optionType}`
+            : order.symbol;
+
+          const isExecuted = order.status === 'EXECUTED';
+          const isPending = order.status === 'PENDING';
+
+          return (
+            <div key={order.id} className="p-3 bg-white dark:bg-[#0E121A] transition-colors">
+              {/* Row 1: Status, Symbol, Type, and Time */}
+              <div className="flex items-start justify-between gap-2 mb-1.5">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold font-mono ${
+                      order.side === 'BUY' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
+                    }`}>
+                      {order.side} {order.type}
+                    </span>
+                    <span className="font-bold text-slate-900 dark:text-white text-xs leading-tight">
+                      {instrumentTitle}
+                    </span>
+                    {expBadge && (
+                      <span className="px-1.5 py-0.2 rounded text-[9px] font-bold font-mono bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30">
+                        {expBadge}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400 font-mono mt-0.5">
+                    <span>{order.product}</span>
+                    <span>•</span>
+                    <span>Qty: {order.quantity}</span>
+                    <span>•</span>
+                    <span>{timeStr}</span>
+                  </div>
+                </div>
+
+                <div className="text-right flex-shrink-0">
+                  <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                    isExecuted
+                      ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20'
+                      : isPending
+                      ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20'
+                      : 'bg-slate-200 dark:bg-slate-700/30 text-slate-600 dark:text-slate-400'
+                  }`}>
+                    {order.status}
+                  </span>
+                </div>
+              </div>
+
+              {/* Row 2: Price details & Action */}
+              <div className="flex items-center justify-between pt-1.5 border-t border-slate-100 dark:border-[#161C26] text-[11px]">
+                <div className="flex items-center gap-3 font-mono text-slate-600 dark:text-slate-400">
+                  <div>
+                    <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase block">Price</span>
+                    <span className="font-semibold text-slate-800 dark:text-slate-200 tabular-nums">
+                      ₹{order.filledPrice ? order.filledPrice.toFixed(2) : order.price.toFixed(2)}
+                    </span>
+                  </div>
+                  {expFull && (
+                    <div className="hidden sm:block">
+                      <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase block">Expiry</span>
+                      <span className="text-[10px] text-slate-700 dark:text-slate-300">{expFull}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  {isPending && (
+                    <button
+                      onClick={() => onCancelOrder(order.id)}
+                      className="px-3 py-1 rounded bg-rose-500/15 hover:bg-rose-500 text-rose-700 dark:text-rose-300 hover:text-white transition-colors text-[11px] font-bold"
+                    >
+                      Cancel Order
+                    </button>
+                  )}
+                  {isExecuted && (
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                      ✓ Filled @ ₹{(order.filledPrice || order.price).toFixed(2)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* DESKTOP VIEW (>= md): Full Data Table */}
+      <div className="hidden md:block flex-1 overflow-x-auto overflow-y-auto">
         <table className="w-full text-left border-collapse min-w-[650px]">
           <thead className="bg-slate-100 dark:bg-[#121622] text-[10px] uppercase font-semibold text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-[#1E2430] sticky top-0">
             <tr>

@@ -48,8 +48,8 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({
   return (
     <div className="flex flex-col h-full bg-white dark:bg-[#0E121A] select-none text-xs transition-colors">
       {/* Positions Header Bar */}
-      <div className="p-2.5 sm:p-3 border-b border-slate-200 dark:border-[#1E2430] bg-slate-50/70 dark:bg-[#0F131C] flex flex-wrap items-center justify-between gap-2.5">
-        <div className="flex items-center gap-2">
+      <div className="p-2.5 sm:p-3 border-b border-slate-200 dark:border-[#1E2430] bg-slate-50/70 dark:bg-[#0F131C] flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {/* Filter sub-tabs */}
           <div className="flex items-center bg-slate-200/80 dark:bg-[#141926] p-0.5 rounded-lg border border-slate-300 dark:border-[#202738]">
             <button
@@ -85,15 +85,15 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({
           </div>
 
           {/* Realized vs Unrealized breakdown pill */}
-          <div className="hidden sm:flex items-center gap-3 pl-3 border-l border-slate-300 dark:border-[#1F2636] text-[11px]">
+          <div className="hidden sm:flex items-center gap-3 pl-2 border-l border-slate-300 dark:border-[#1F2636] text-[11px]">
             <div>
-              <span className="text-slate-500 dark:text-slate-400">Booked P&L: </span>
+              <span className="text-slate-500 dark:text-slate-400">Booked: </span>
               <strong className={`font-mono tabular-nums ${totalRealizedPnL >= 0 ? 'text-[#00D09C]' : 'text-[#EB5B3C]'}`}>
                 {totalRealizedPnL >= 0 ? '+' : ''}₹{totalRealizedPnL.toFixed(2)}
               </strong>
             </div>
             <div>
-              <span className="text-slate-500 dark:text-slate-400">Open MTM: </span>
+              <span className="text-slate-500 dark:text-slate-400">MTM: </span>
               <strong className={`font-mono tabular-nums ${totalUnrealizedPnL >= 0 ? 'text-[#00D09C]' : 'text-[#EB5B3C]'}`}>
                 {totalUnrealizedPnL >= 0 ? '+' : ''}₹{totalUnrealizedPnL.toFixed(2)}
               </strong>
@@ -104,7 +104,7 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({
         <div className="flex items-center gap-2">
           {/* Total Today P&L */}
           <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-[#161C28] border border-slate-200 dark:border-[#222A3A]">
-            <span className="text-slate-500 dark:text-slate-400 text-[11px]">Today's Total:</span>
+            <span className="text-slate-500 dark:text-slate-400 text-[11px]">Today P&L:</span>
             <span className={`font-mono font-bold tabular-nums text-xs ${
               totalTodayPnL >= 0 ? 'text-[#00D09C]' : 'text-[#EB5B3C]'
             }`}>
@@ -128,8 +128,112 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({
         </div>
       </div>
 
-      {/* Positions Table */}
-      <div className="flex-1 overflow-x-auto overflow-y-auto">
+      {/* MOBILE VIEW (< md): Zerodha/Groww style dedicated cards */}
+      <div className="md:hidden flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-[#171C26] pb-16">
+        {filteredPositions.map((pos) => {
+          const isClosed = pos.status === 'CLOSED';
+          const pnl = isClosed ? (pos.realizedPnL || 0) : pos.unrealizedPnL;
+          const isProfit = pnl >= 0;
+
+          const isOption = pos.segment === 'OPTION' && !!pos.contractDetails?.strikePrice;
+          const expBadge = isOption ? formatExpiryBadge(pos.contractDetails?.expiryDate, pos.symbol) : '';
+          const expFull = isOption ? formatExpiryFull(pos.contractDetails?.expiryDate, pos.symbol) : '';
+
+          const title = pos.contractDetails?.optionType
+            ? `${pos.symbol} ${pos.contractDetails.strikePrice} ${pos.contractDetails.optionType}`
+            : pos.symbol;
+
+          return (
+            <div
+              key={pos.id}
+              className={`p-3 transition-colors ${
+                isClosed ? 'bg-slate-50/50 dark:bg-[#10141D]/60 opacity-80' : 'bg-white dark:bg-[#0E121A]'
+              }`}
+            >
+              {/* Row 1: Symbol, Tag, and Main P&L */}
+              <div className="flex items-start justify-between gap-2 mb-1.5">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-bold text-slate-900 dark:text-white text-xs leading-tight">
+                      {title}
+                    </span>
+                    {expBadge && (
+                      <span className="px-1.5 py-0.2 rounded text-[9px] font-bold font-mono bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30">
+                        {expBadge}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400 font-mono mt-0.5">
+                    <span className={`font-bold ${pos.side === 'BUY' ? 'text-emerald-500' : 'text-rose-500'}`}>
+                      {pos.side}
+                    </span>
+                    <span>•</span>
+                    <span>{pos.product === 'INTRADAY' ? 'MIS' : 'CNC'}</span>
+                    <span>•</span>
+                    <span>Qty: {isClosed ? '0 (Exited)' : pos.quantity}</span>
+                  </div>
+                </div>
+
+                <div className="text-right flex-shrink-0">
+                  <div className={`font-mono font-bold tabular-nums text-sm ${
+                    isProfit ? 'text-[#00D09C]' : 'text-[#EB5B3C]'
+                  }`}>
+                    {isProfit ? '+' : ''}₹{pnl.toFixed(2)}
+                  </div>
+                  <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
+                    {isClosed ? 'Booked' : `${isProfit ? '+' : ''}${pos.unrealizedPnLPerc.toFixed(2)}%`}
+                  </div>
+                </div>
+              </div>
+
+              {/* Row 2: Price details & Action button */}
+              <div className="flex items-center justify-between pt-1.5 border-t border-slate-100 dark:border-[#161C26] text-[11px]">
+                <div className="flex items-center gap-3 font-mono text-slate-600 dark:text-slate-400">
+                  <div>
+                    <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase block">Avg</span>
+                    <span className="font-semibold text-slate-800 dark:text-slate-200 tabular-nums">
+                      ₹{pos.averagePrice.toFixed(2)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase block">
+                      {isClosed ? 'Exit' : 'LTP'}
+                    </span>
+                    <span className="font-semibold text-slate-800 dark:text-slate-200 tabular-nums">
+                      ₹{(isClosed ? (pos.exitPrice || pos.currentPrice) : pos.currentPrice).toFixed(2)}
+                    </span>
+                  </div>
+                  {expFull && (
+                    <div className="hidden sm:block">
+                      <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase block">Exp</span>
+                      <span className="text-[10px] text-slate-700 dark:text-slate-300">{expFull}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  {isClosed ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-[#161B24] border border-slate-200 dark:border-[#222834]">
+                      <Check className="w-3 h-3 text-emerald-500" />
+                      <span>Closed</span>
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => onClosePosition(pos.id)}
+                      className="px-3 py-1 rounded bg-rose-500/10 hover:bg-rose-500 text-[#EB5B3C] hover:text-white border border-rose-500/20 text-[11px] font-bold transition-all shadow-xs"
+                    >
+                      Exit
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* DESKTOP VIEW (>= md): Full Data Table */}
+      <div className="hidden md:block flex-1 overflow-x-auto overflow-y-auto">
         <table className="w-full text-left border-collapse min-w-[700px]">
           <thead className="bg-slate-100 dark:bg-[#121622] text-[10px] uppercase font-semibold text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-[#1E2430] sticky top-0 z-10">
             <tr>
