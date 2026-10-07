@@ -4,6 +4,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Quote } from '@/types/market';
 import { PortfolioSummary } from '@/types/trading';
 import { useTheme } from '@/lib/themeContext';
+import { useAuth } from '@/lib/authContext';
+import { UserAuthModal } from '@/components/UserAuthModal';
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -14,7 +16,8 @@ import {
   ShieldCheck,
   X,
   Sun,
-  Moon
+  Moon,
+  User
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -31,6 +34,8 @@ export const Header: React.FC<HeaderProps> = ({
   onSelectSymbol,
 }) => {
   const { theme, toggleTheme } = useTheme();
+  const { currentUser } = useAuth();
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -215,8 +220,31 @@ export const Header: React.FC<HeaderProps> = ({
               <RotateCcw className="w-3.5 h-3.5" />
             </button>
           </div>
+
+          {/* User Account / Profile Switcher Button */}
+          <button
+            onClick={() => setShowAuthModal(true)}
+            title="User Profile & Password Protection"
+            className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-[#141926] hover:bg-slate-200 dark:hover:bg-[#1E2536] border border-slate-200 dark:border-[#21293B] text-slate-700 dark:text-slate-200 transition-all shadow-xs"
+          >
+            <div className={`w-6 h-6 rounded-full bg-gradient-to-tr ${currentUser?.avatarColor || 'from-[#00D09C] to-teal-600'} text-white font-bold flex items-center justify-center text-[10px] uppercase shadow-xs`}>
+              {currentUser?.username ? currentUser.username.substring(0, 2) : <User className="w-3 h-3" />}
+            </div>
+            <div className="hidden sm:flex flex-col text-left leading-none">
+              <span className="text-[11px] font-bold text-slate-900 dark:text-white truncate max-w-[80px]">
+                {currentUser?.username || 'User'}
+              </span>
+              <span className="text-[9px] text-[#00D09C] font-semibold mt-0.5">Switch / Lock</span>
+            </div>
+          </button>
         </div>
       </div>
+
+      {/* User Auth Modal */}
+      <UserAuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+      />
 
       {/* Global Search Modal */}
       {showSearchModal && (

@@ -4,9 +4,10 @@ import { useState, useEffect, useCallback } from 'react';
 import { Order, Position, PortfolioSummary, OrderSide, OrderProduct, OrderType, TradingSegment } from '@/types/trading';
 import { INITIAL_DEMO_CAPITAL, getDefaultExpiry } from '@/lib/constants';
 
-const STORAGE_KEY_POSITIONS = 'first_trade_positions';
-const STORAGE_KEY_ORDERS = 'first_trade_orders';
-const STORAGE_KEY_BALANCE = 'first_trade_balance';
+const getStorageKey = (key: string, username?: string) => {
+  if (!username) return key;
+  return `first_trade_${username}_${key}`;
+};
 
 export interface TradeOrderParams {
   symbol: string;
@@ -36,20 +37,36 @@ export function isToday(timestamp?: number): boolean {
          date.getDate() === now.getDate();
 }
 
-export function useTradeStore() {
+export function useTradeStore(username?: string) {
   const [balance, setBalance] = useState<number>(INITIAL_DEMO_CAPITAL);
   const [positions, setPositions] = useState<Position[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Load from localStorage on mount and prune items older than today (after 11:59 PM rollover)
+  // Load from localStorage when mounted or when username changes
   useEffect(() => {
+    setIsLoaded(false);
     try {
-      const storedBalance = localStorage.getItem(STORAGE_KEY_BALANCE);
-      const storedPositions = localStorage.getItem(STORAGE_KEY_POSITIONS);
-      const storedOrders = localStorage.getItem(STORAGE_KEY_ORDERS);
+      const balanceKey = getStorageKey('balance', username);
+      const positionsKey = getStorageKey('positions', username);
+      const ordersKey = getStorageKey('orders', username);
 
-      if (storedBalance) setBalance(JSON.parse(storedBalance));
+      // If user specific data doesn't exist yet, check global key for migration fallback
+      let storedBalance = localStorage.getItem(balanceKey);
+      let storedPositions = localStorage.getItem(positionsKey);
+      let storedOrders = localStorage.getItem(ordersKey);
+
+      if (!storedBalance && !username) {
+        storedBalance = localStorage.getItem('first_trade_balance');
+      }
+      if (!storedPositions && !username) {
+        storedPositions = localStorage.getItem('first_trade_positions');
+      }
+      if (!storedOrders && !username) {
+        storedOrders = localStorage.getItem('first_trade_orders');
+      }
+
+      setBalance(storedBalance ? JSON.parse(storedBalance) : INITIAL_DEMO_CAPITAL);
       
       if (storedPositions) {
         const rawPositions: Position[] = JSON.parse(storedPositions);
@@ -72,6 +89,8 @@ export function useTradeStore() {
           return p;
         });
         setPositions(validPositions);
+      } else {
+        setPositions([]);
       }
 
       if (storedOrders) {
@@ -90,25 +109,34 @@ export function useTradeStore() {
           return o;
         });
         setOrders(validOrders);
+      } else {
+        setOrders([]);
       }
     } catch (e) {
       console.error('Failed to load trades from storage', e);
+      setBalance(INITIAL_DEMO_CAPITAL);
+      setPositions([]);
+      setOrders([]);
     } finally {
       setIsLoaded(true);
     }
-  }, []);
+  }, [username]);
 
   // Save to localStorage when state changes
   useEffect(() => {
     if (!isLoaded) return;
     try {
-      localStorage.setItem(STORAGE_KEY_BALANCE, JSON.stringify(balance));
-      localStorage.setItem(STORAGE_KEY_POSITIONS, JSON.stringify(positions));
-      localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify(orders));
+      const balanceKey = getStorageKey('balance', username);
+      const positionsKey = getStorageKey('positions', username);
+      const ordersKey = getStorageKey('orders', username);
+
+      localStorage.setItem(balanceKey, JSON.stringify(balance));
+      localStorage.setItem(positionsKey, JSON.stringify(positions));
+      localStorage.setItem(ordersKey, JSON.stringify(orders));
     } catch (e) {
       console.error('Failed to save trades to storage', e);
     }
-  }, [balance, positions, orders, isLoaded]);
+  }, [balance, positions, orders, isLoaded, username]);
 
   // Periodic Midnight (11:59 PM) Pruning Check
   useEffect(() => {
@@ -159,11 +187,11 @@ export function useTradeStore() {
     setPositions([]);
     setOrders([]);
     try {
-      localStorage.removeItem(STORAGE_KEY_BALANCE);
-      localStorage.removeItem(STORAGE_KEY_POSITIONS);
-      localStorage.removeItem(STORAGE_KEY_ORDERS);
+      localStorage.removeItem(getStorageKey('balance', username));
+      localStorage.removeItem(getStorageKey('positions', username));
+      localStorage.removeItem(getStorageKey('orders', username));
     } catch {}
-  }, []);
+  }, [username]);
 
   // Execute an order
   const placeOrder = useCallback((params: TradeOrderParams): { success: boolean; message: string } => {

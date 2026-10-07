@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { ThemeProvider } from "@/lib/themeContext";
+import { AuthProvider } from "@/lib/authContext";
 import { PWAInstaller } from "@/components/PWAInstaller";
 import "./globals.css";
 
@@ -45,8 +46,10 @@ export default function RootLayout({
       </head>
       <body className="bg-slate-50 dark:bg-[#0B0E14] text-slate-900 dark:text-slate-100 min-h-screen selection:bg-emerald-500/30 selection:text-emerald-700 dark:selection:text-emerald-200">
         <ThemeProvider>
-          <PWAInstaller />
-          {children}
+          <AuthProvider>
+            <PWAInstaller />
+            {children}
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>
