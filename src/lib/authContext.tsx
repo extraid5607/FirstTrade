@@ -9,6 +9,7 @@ export interface UserProfile {
 
 interface AuthContextType {
   currentUser: UserProfile | null;
+  isAuthReady: boolean;
   register: (email: string, password: string) => Promise<{ success: boolean; message?: string }>;
   login: (email: string, password: string) => Promise<{ success: boolean; message?: string }>;
   logout: () => void;
@@ -37,6 +38,7 @@ function getAvatarColor(name: string): string {
 
 const AuthContext = createContext<AuthContextType>({
   currentUser: null,
+  isAuthReady: false,
   register: async () => ({ success: false }),
   login: async () => ({ success: false }),
   logout: () => {},
@@ -44,9 +46,25 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const savedUser = localStorage.getItem(STORAGE_KEY_AUTH_USER);
+      if (savedUser) {
+        const parsed = JSON.parse(savedUser);
+        if (parsed?.email) {
+          return {
+            email: parsed.email.toLowerCase(),
+            avatarColor: getAvatarColor(parsed.email),
+          };
+        }
+      }
+    } catch {}
+    return null;
+  });
+  const [isAuthReady, setIsAuthReady] = useState(false);
 
-  // Load active user session from localStorage on mount
+  // Mark auth ready on mount and ensure session is up to date
   useEffect(() => {
     try {
       const savedUser = localStorage.getItem(STORAGE_KEY_AUTH_USER);
@@ -61,6 +79,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     } catch (e) {
       console.error('Failed to load session', e);
+    } finally {
+      setIsAuthReady(true);
     }
   }, []);
 
@@ -155,6 +175,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   return (
     <AuthContext.Provider value={{ 
       currentUser, 
+      isAuthReady,
       register, 
       login, 
       logout, 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Order, Position, PortfolioSummary, OrderSide, OrderProduct, OrderType, TradingSegment } from '@/types/trading';
 import { INITIAL_DEMO_CAPITAL, getDefaultExpiry } from '@/lib/constants';
 
@@ -37,7 +37,7 @@ export function isToday(timestamp?: number): boolean {
          date.getDate() === now.getDate();
 }
 
-export function useTradeStore(userId?: string) {
+export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
   const cleanUser = userId ? userId.trim().toLowerCase() : undefined;
 
   const [balance, setBalance] = useState<number>(INITIAL_DEMO_CAPITAL);
@@ -45,38 +45,50 @@ export function useTradeStore(userId?: string) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Load from Cloud Redis (with localStorage immediate cache) when user changes
+  // References to guarantee no race-conditions or accidental state wiping
+  const loadedForUserRef = useRef<string | null>(null);
+  const isInitialSyncDoneRef = useRef(false);
+  const lastSavedHashRef = useRef<string>('');
+
+  // Load from Cloud Redis (with localStorage immediate cache) when user changes or auth is ready
   useEffect(() => {
-    setIsLoaded(false);
+    if (!isAuthReady) return;
+
     let isCancelled = false;
+    loadedForUserRef.current = null;
+    isInitialSyncDoneRef.current = false;
+    setIsLoaded(false);
 
     async function loadTrades() {
-      // 1. Immediate local cache fallback
+      const targetUser = cleanUser || '__guest__';
       const balanceKey = getStorageKey('balance', cleanUser);
       const positionsKey = getStorageKey('positions', cleanUser);
       const ordersKey = getStorageKey('orders', cleanUser);
+
+      // 1. Immediate local cache retrieval
+      let curBal = INITIAL_DEMO_CAPITAL;
+      let curPos: Position[] = [];
+      let curOrd: Order[] = [];
 
       const localBal = localStorage.getItem(balanceKey);
       const localPos = localStorage.getItem(positionsKey);
       const localOrd = localStorage.getItem(ordersKey);
 
       if (localBal) {
-        setBalance(JSON.parse(localBal));
-      } else {
-        setBalance(INITIAL_DEMO_CAPITAL);
+        try { curBal = JSON.parse(localBal); } catch {}
       }
-
       if (localPos) {
-        setPositions(JSON.parse(localPos));
-      } else {
-        setPositions([]);
+        try { curPos = JSON.parse(localPos); } catch {}
+      }
+      if (localOrd) {
+        try { curOrd = JSON.parse(localOrd); } catch {}
       }
 
-      if (localOrd) {
-        setOrders(JSON.parse(localOrd));
-      } else {
-        setOrders([]);
-      }
+      if (isCancelled) return;
+
+      setBalance(curBal);
+      setPositions(curPos);
+      setOrders(curOrd);
 
       // 2. Fetch latest synced data from Cloud Upstash Redis
       if (cleanUser) {
@@ -85,10 +97,11 @@ export function useTradeStore(userId?: string) {
           if (res.ok && !isCancelled) {
             const data = await res.json();
             if (data.balance !== undefined) {
+              curBal = data.balance;
               setBalance(data.balance);
               localStorage.setItem(balanceKey, JSON.stringify(data.balance));
             }
-            if (data.positions) {
+            if (data.positions && Array.isArray(data.positions)) {
               const validPos = data.positions.filter((p: Position) => {
                 if (p.status === 'CLOSED') return isToday(p.closedAt || p.openedAt);
                 return true;
@@ -104,13 +117,22 @@ export function useTradeStore(userId?: string) {
                 }
                 return p;
               });
-              setPositions(validPos);
-              localStorage.setItem(positionsKey, JSON.stringify(validPos));
+
+              // Guard: If cloud has positions, OR if local was also empty, update with cloud
+              // If cloud is empty but local has positions, preserve local positions!
+              if (validPos.length > 0 || curPos.length === 0) {
+                curPos = validPos;
+                setPositions(validPos);
+                localStorage.setItem(positionsKey, JSON.stringify(validPos));
+              }
             }
-            if (data.orders) {
+            if (data.orders && Array.isArray(data.orders)) {
               const validOrd = data.orders.filter((o: Order) => isToday(o.timestamp));
-              setOrders(validOrd);
-              localStorage.setItem(ordersKey, JSON.stringify(validOrd));
+              if (validOrd.length > 0 || curOrd.length === 0) {
+                curOrd = validOrd;
+                setOrders(validOrd);
+                localStorage.setItem(ordersKey, JSON.stringify(validOrd));
+              }
             }
           }
         } catch (e) {
@@ -119,7 +141,23 @@ export function useTradeStore(userId?: string) {
       }
 
       if (!isCancelled) {
+        loadedForUserRef.current = targetUser;
+        // Seed the hash so initial load doesn't trigger an immediate redundant save back to Redis
+        lastSavedHashRef.current = JSON.stringify({
+          bal: curBal,
+          posCount: curPos.length,
+          pos: curPos.map(p => `${p.id}:${p.quantity}:${p.status}:${p.averagePrice}`),
+          ordCount: curOrd.length,
+          ord: curOrd.map(o => `${o.id}:${o.status}`)
+        });
+
         setIsLoaded(true);
+
+        setTimeout(() => {
+          if (!isCancelled) {
+            isInitialSyncDoneRef.current = true;
+          }
+        }, 150);
       }
     }
 
@@ -128,32 +166,54 @@ export function useTradeStore(userId?: string) {
     return () => {
       isCancelled = true;
     };
-  }, [cleanUser]);
+  }, [cleanUser, isAuthReady]);
 
-  // Save to localStorage & Cloud Redis when state changes
+  // Save to localStorage & Cloud Redis when trade state changes
   useEffect(() => {
-    if (!isLoaded) return;
+    const targetUser = cleanUser || '__guest__';
+
+    // STRICT SAFETY GUARDS:
+    // 1. Must be loaded
+    // 2. Initial sync must be complete
+    // 3. Current memory state must belong to the active user (prevents wiping on user switch)
+    if (!isLoaded || !isInitialSyncDoneRef.current || loadedForUserRef.current !== targetUser) {
+      return;
+    }
+
     try {
       const balanceKey = getStorageKey('balance', cleanUser);
       const positionsKey = getStorageKey('positions', cleanUser);
       const ordersKey = getStorageKey('orders', cleanUser);
 
+      // Always update localStorage
       localStorage.setItem(balanceKey, JSON.stringify(balance));
       localStorage.setItem(positionsKey, JSON.stringify(positions));
       localStorage.setItem(ordersKey, JSON.stringify(orders));
 
-      // Push to Cloud Upstash Redis
-      if (cleanUser) {
-        fetch('/api/user/trades', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: cleanUser,
-            balance,
-            positions,
-            orders,
-          }),
-        }).catch(err => console.error('Cloud Redis save error', err));
+      // Calculate structural fingerprint (only push to Cloud Redis when orders/positions/balance actually change)
+      const currentHash = JSON.stringify({
+        bal: balance,
+        posCount: positions.length,
+        pos: positions.map(p => `${p.id}:${p.quantity}:${p.status}:${p.averagePrice}`),
+        ordCount: orders.length,
+        ord: orders.map(o => `${o.id}:${o.status}`)
+      });
+
+      if (currentHash !== lastSavedHashRef.current) {
+        lastSavedHashRef.current = currentHash;
+
+        if (cleanUser) {
+          fetch('/api/user/trades', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: cleanUser,
+              balance,
+              positions,
+              orders,
+            }),
+          }).catch(err => console.error('Cloud Redis save error', err));
+        }
       }
     } catch (e) {
       console.error('Failed to save trades', e);

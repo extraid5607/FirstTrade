@@ -17,7 +17,7 @@ import { TradingSegment, OrderSide } from '@/types/trading';
 import { BarChart2, Layers, Briefcase, Clock, ShieldCheck, Zap, ArrowLeft, User } from 'lucide-react';
 
 export default function TerminalPage() {
-  const { currentUser } = useAuth();
+  const { currentUser, isAuthReady } = useAuth();
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [selectedSymbol, setSelectedSymbol] = useState<string>('NIFTY');
   const [centerView, setCenterView] = useState<'CHART' | 'OPTIONS'>('CHART');
@@ -61,7 +61,7 @@ export default function TerminalPage() {
     cancelOrder,
     updatePrices,
     resetAccount,
-  } = useTradeStore(currentUser?.email);
+  } = useTradeStore(currentUser?.email, isAuthReady);
 
   const positionsRef = useRef(positions);
   positionsRef.current = positions;
