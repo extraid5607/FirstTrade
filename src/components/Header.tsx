@@ -178,22 +178,32 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           </div>
 
-          {/* User Account / Profile Switcher Button */}
-          <button
-            onClick={() => setShowAuthModal(true)}
-            title="User Profile & Password Protection"
-            className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-[#141926] hover:bg-slate-200 dark:hover:bg-[#1E2536] border border-slate-200 dark:border-[#21293B] text-slate-700 dark:text-slate-200 transition-all shadow-xs"
-          >
-            <div className={`w-6 h-6 rounded-full bg-gradient-to-tr ${currentUser?.avatarColor || 'from-[#00D09C] to-teal-600'} text-white font-bold flex items-center justify-center text-[10px] uppercase shadow-xs`}>
-              {currentUser?.username ? currentUser.username.substring(0, 2) : <User className="w-3 h-3" />}
-            </div>
-            <div className="hidden sm:flex flex-col text-left leading-none">
-              <span className="text-[11px] font-bold text-slate-900 dark:text-white truncate max-w-[80px]">
-                {currentUser?.username || 'User'}
-              </span>
-              <span className="text-[9px] text-[#00D09C] font-semibold mt-0.5">Switch / Lock</span>
-            </div>
-          </button>
+          {/* User Account / Profile Button */}
+          {currentUser ? (
+            <button
+              onClick={() => setShowAuthModal(true)}
+              title={`Logged in as ${currentUser.email}`}
+              className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-[#141926] hover:bg-slate-200 dark:hover:bg-[#1E2536] border border-slate-200 dark:border-[#21293B] text-slate-700 dark:text-slate-200 transition-all shadow-xs"
+            >
+              <div className={`w-6 h-6 rounded-full bg-gradient-to-tr ${currentUser.avatarColor || 'from-[#00D09C] to-teal-600'} text-white font-bold flex items-center justify-center text-[10px] uppercase shadow-xs`}>
+                {currentUser.email.substring(0, 2).toUpperCase()}
+              </div>
+              <div className="hidden sm:flex flex-col text-left leading-none">
+                <span className="text-[11px] font-bold text-slate-900 dark:text-white truncate max-w-[120px]">
+                  {currentUser.email.split('@')[0]}
+                </span>
+                <span className="text-[9px] text-[#00D09C] font-semibold mt-0.5">Account</span>
+              </div>
+            </button>
+          ) : (
+            <button
+              onClick={() => setShowAuthModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#00D09C] hover:bg-[#00B887] text-black font-extrabold text-xs transition-all shadow-xs"
+            >
+              <User className="w-3.5 h-3.5" />
+              <span>Sign In</span>
+            </button>
+          )}
         </div>
       </div>
 

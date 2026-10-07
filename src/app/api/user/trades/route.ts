@@ -2,18 +2,29 @@ import { NextRequest, NextResponse } from 'next/server';
 import { redis } from '@/lib/redis';
 import { INITIAL_DEMO_CAPITAL } from '@/lib/constants';
 
+// Standardized safe user data key
+function getUserDataKey(id: string): string {
+  const clean = id.trim().toLowerCase();
+  return `ft_user:${clean}:data`;
+}
+
 // GET: Load user trade data (balance, positions, orders) from Upstash Redis
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const username = searchParams.get('username');
+    const userId = searchParams.get('userId') || searchParams.get('username') || searchParams.get('email');
 
-    if (!username) {
-      return NextResponse.json({ error: 'Username is required' }, { status: 400 });
+    if (!userId) {
+      return NextResponse.json({ error: 'User identifier is required' }, { status: 400 });
     }
 
-    const key = `ft_user:${username}:data`;
-    const data: any = await redis.get(key);
+    const key = getUserDataKey(userId);
+    let data: any = await redis.get(key);
+
+    // Fallback: check raw key if legacy
+    if (!data) {
+      data = await redis.get(`ft_user:${userId}:data`);
+    }
 
     if (!data) {
       return NextResponse.json({
@@ -34,13 +45,14 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { username, balance, positions, orders } = body;
+    const { userId, username, email, balance, positions, orders } = body;
+    const targetId = userId || email || username;
 
-    if (!username) {
-      return NextResponse.json({ error: 'Username is required' }, { status: 400 });
+    if (!targetId) {
+      return NextResponse.json({ error: 'User identifier is required' }, { status: 400 });
     }
 
-    const key = `ft_user:${username}:data`;
+    const key = getUserDataKey(targetId);
     await redis.set(key, {
       balance,
       positions,

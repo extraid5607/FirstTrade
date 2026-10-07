@@ -61,7 +61,7 @@ export default function TerminalPage() {
     cancelOrder,
     updatePrices,
     resetAccount,
-  } = useTradeStore(currentUser?.username);
+  } = useTradeStore(currentUser?.email);
 
   const positionsRef = useRef(positions);
   positionsRef.current = positions;
@@ -221,9 +221,9 @@ export default function TerminalPage() {
     lotSize?: number,
     initialPrice?: number
   ) => {
-    // Enforce that user must create User ID & password account before trading
+    // Enforce that user must Sign In or Sign Up before trading
     if (!currentUser) {
-      alert('Please create a User ID and password in the Account tab first before trading!');
+      alert('Please Sign In or Sign Up with your Gmail & password in the Account tab first before trading!');
       setBottomTab('ACCOUNT');
       navigateToTab('ACCOUNT');
       return;
@@ -369,7 +369,7 @@ export default function TerminalPage() {
                   }`}
                 >
                   <User className="w-3 h-3 text-purple-500" />
-                  <span>Account {currentUser ? `(${currentUser.username})` : '(Login/Sign Up)'}</span>
+                  <span>Account {currentUser ? `(${currentUser.email})` : '(Sign In / Sign Up)'}</span>
                 </button>
               </div>
 

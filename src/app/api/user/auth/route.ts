@@ -1,80 +1,90 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { redis } from '@/lib/redis';
 
-// GET: Load user profiles or verify unique username
+// GET: Check if email exists
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const checkUsername = searchParams.get('check');
+    const checkEmail = searchParams.get('email');
 
-    const usersMap: Record<string, string> = (await redis.get('ft_users_registry')) || {};
+    const usersMap: Record<string, { password: string; name?: string }> = 
+      (await redis.get('ft_users_registry_v2')) || {};
 
-    if (checkUsername) {
-      const lower = checkUsername.trim().toLowerCase();
-      const isTaken = Object.keys(usersMap).some(u => u.toLowerCase() === lower);
+    if (checkEmail) {
+      const lower = checkEmail.trim().toLowerCase();
+      const isTaken = Object.keys(usersMap).some(e => e.toLowerCase() === lower);
       return NextResponse.json({ available: !isTaken });
     }
 
-    // Return list of usernames (without passwords for security)
-    const usernames = Object.keys(usersMap);
-    return NextResponse.json({ users: usernames });
+    return NextResponse.json({ count: Object.keys(usersMap).length });
   } catch (error) {
     console.error('API /api/user/auth GET error', error);
-    return NextResponse.json({ error: 'Failed to fetch users' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to query users' }, { status: 500 });
   }
 }
 
-// POST: Register or Login user
+// POST: Sign Up, Sign In, Delete Account
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { action, username, password } = body;
+    const { action, email, password } = body;
 
-    const trimmed = (username || '').trim();
-    if (!trimmed) {
-      return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
+    const cleanEmail = (email || '').trim().toLowerCase();
+    if (!cleanEmail) {
+      return NextResponse.json({ error: 'Email is required' }, { status: 400 });
     }
 
-    const usersMap: Record<string, string> = (await redis.get('ft_users_registry')) || {};
+    // Email regex validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      return NextResponse.json({ error: 'Please enter a valid Gmail / Email address' }, { status: 400 });
+    }
 
-    if (action === 'REGISTER') {
-      if (trimmed.length < 3) {
-        return NextResponse.json({ error: 'User ID must be at least 3 characters' }, { status: 400 });
-      }
+    const usersMap: Record<string, { password: string; name?: string }> = 
+      (await redis.get('ft_users_registry_v2')) || {};
+
+    // 1. SIGN UP (Create new account with Email & Password)
+    if (action === 'SIGNUP' || action === 'REGISTER') {
       if (!password || password.length < 4) {
         return NextResponse.json({ error: 'Password must be at least 4 characters' }, { status: 400 });
       }
 
-      const isTaken = Object.keys(usersMap).some(u => u.toLowerCase() === trimmed.toLowerCase());
-      if (isTaken) {
-        return NextResponse.json({ error: `User ID '${trimmed}' is already taken!` }, { status: 409 });
+      if (usersMap[cleanEmail]) {
+        return NextResponse.json({ error: 'An account with this email already exists! Please Sign In.' }, { status: 409 });
       }
 
-      usersMap[trimmed] = password;
-      await redis.set('ft_users_registry', usersMap);
+      usersMap[cleanEmail] = { password };
+      await redis.set('ft_users_registry_v2', usersMap);
 
-      return NextResponse.json({ success: true, username: trimmed });
+      return NextResponse.json({ 
+        success: true, 
+        email: cleanEmail 
+      });
     }
 
-    if (action === 'LOGIN') {
-      const matchedKey = Object.keys(usersMap).find(u => u.toLowerCase() === trimmed.toLowerCase());
-      if (!matchedKey) {
-        return NextResponse.json({ error: `User ID '${trimmed}' not found. Please register first.` }, { status: 404 });
+    // 2. SIGN IN (Login with Email & Password)
+    if (action === 'SIGNIN' || action === 'LOGIN') {
+      const user = usersMap[cleanEmail];
+      if (!user) {
+        return NextResponse.json({ error: 'No account found with this email. Please Sign Up first.' }, { status: 404 });
       }
 
-      if (usersMap[matchedKey] !== password) {
-        return NextResponse.json({ error: 'Incorrect password' }, { status: 401 });
+      if (user.password !== password) {
+        return NextResponse.json({ error: 'Incorrect password. Please try again.' }, { status: 401 });
       }
 
-      return NextResponse.json({ success: true, username: matchedKey });
+      return NextResponse.json({ 
+        success: true, 
+        email: cleanEmail 
+      });
     }
 
+    // 3. DELETE ACCOUNT
     if (action === 'DELETE') {
-      const matchedKey = Object.keys(usersMap).find(u => u.toLowerCase() === trimmed.toLowerCase());
-      if (matchedKey) {
-        delete usersMap[matchedKey];
-        await redis.set('ft_users_registry', usersMap);
-        await redis.del(`ft_user:${matchedKey}:data`);
+      if (usersMap[cleanEmail]) {
+        delete usersMap[cleanEmail];
+        await redis.set('ft_users_registry_v2', usersMap);
+        await redis.del(`ft_user:${cleanEmail}:data`);
       }
       return NextResponse.json({ success: true });
     }

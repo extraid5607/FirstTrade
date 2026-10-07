@@ -4,9 +4,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { Order, Position, PortfolioSummary, OrderSide, OrderProduct, OrderType, TradingSegment } from '@/types/trading';
 import { INITIAL_DEMO_CAPITAL, getDefaultExpiry } from '@/lib/constants';
 
-const getStorageKey = (key: string, username?: string) => {
-  if (!username) return key;
-  return `first_trade_${username}_${key}`;
+const getStorageKey = (key: string, userId?: string) => {
+  if (!userId) return `first_trade_guest_${key}`;
+  return `first_trade_${userId.trim().toLowerCase()}_${key}`;
 };
 
 export interface TradeOrderParams {
@@ -37,38 +37,57 @@ export function isToday(timestamp?: number): boolean {
          date.getDate() === now.getDate();
 }
 
-export function useTradeStore(username?: string) {
+export function useTradeStore(userId?: string) {
+  const cleanUser = userId ? userId.trim().toLowerCase() : undefined;
+
   const [balance, setBalance] = useState<number>(INITIAL_DEMO_CAPITAL);
   const [positions, setPositions] = useState<Position[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Load from Cloud Redis (with localStorage immediate cache) when username changes
+  // Load from Cloud Redis (with localStorage immediate cache) when user changes
   useEffect(() => {
     setIsLoaded(false);
     let isCancelled = false;
 
     async function loadTrades() {
       // 1. Immediate local cache fallback
-      const balanceKey = getStorageKey('balance', username);
-      const positionsKey = getStorageKey('positions', username);
-      const ordersKey = getStorageKey('orders', username);
+      const balanceKey = getStorageKey('balance', cleanUser);
+      const positionsKey = getStorageKey('positions', cleanUser);
+      const ordersKey = getStorageKey('orders', cleanUser);
 
       const localBal = localStorage.getItem(balanceKey);
       const localPos = localStorage.getItem(positionsKey);
       const localOrd = localStorage.getItem(ordersKey);
 
-      if (localBal) setBalance(JSON.parse(localBal));
-      if (localPos) setPositions(JSON.parse(localPos));
-      if (localOrd) setOrders(JSON.parse(localOrd));
+      if (localBal) {
+        setBalance(JSON.parse(localBal));
+      } else {
+        setBalance(INITIAL_DEMO_CAPITAL);
+      }
+
+      if (localPos) {
+        setPositions(JSON.parse(localPos));
+      } else {
+        setPositions([]);
+      }
+
+      if (localOrd) {
+        setOrders(JSON.parse(localOrd));
+      } else {
+        setOrders([]);
+      }
 
       // 2. Fetch latest synced data from Cloud Upstash Redis
-      if (username) {
+      if (cleanUser) {
         try {
-          const res = await fetch(`/api/user/trades?username=${encodeURIComponent(username)}`);
+          const res = await fetch(`/api/user/trades?userId=${encodeURIComponent(cleanUser)}`);
           if (res.ok && !isCancelled) {
             const data = await res.json();
-            if (data.balance !== undefined) setBalance(data.balance);
+            if (data.balance !== undefined) {
+              setBalance(data.balance);
+              localStorage.setItem(balanceKey, JSON.stringify(data.balance));
+            }
             if (data.positions) {
               const validPos = data.positions.filter((p: Position) => {
                 if (p.status === 'CLOSED') return isToday(p.closedAt || p.openedAt);
@@ -86,10 +105,12 @@ export function useTradeStore(username?: string) {
                 return p;
               });
               setPositions(validPos);
+              localStorage.setItem(positionsKey, JSON.stringify(validPos));
             }
             if (data.orders) {
               const validOrd = data.orders.filter((o: Order) => isToday(o.timestamp));
               setOrders(validOrd);
+              localStorage.setItem(ordersKey, JSON.stringify(validOrd));
             }
           }
         } catch (e) {
@@ -107,27 +128,27 @@ export function useTradeStore(username?: string) {
     return () => {
       isCancelled = true;
     };
-  }, [username]);
+  }, [cleanUser]);
 
   // Save to localStorage & Cloud Redis when state changes
   useEffect(() => {
     if (!isLoaded) return;
     try {
-      const balanceKey = getStorageKey('balance', username);
-      const positionsKey = getStorageKey('positions', username);
-      const ordersKey = getStorageKey('orders', username);
+      const balanceKey = getStorageKey('balance', cleanUser);
+      const positionsKey = getStorageKey('positions', cleanUser);
+      const ordersKey = getStorageKey('orders', cleanUser);
 
       localStorage.setItem(balanceKey, JSON.stringify(balance));
       localStorage.setItem(positionsKey, JSON.stringify(positions));
       localStorage.setItem(ordersKey, JSON.stringify(orders));
 
       // Push to Cloud Upstash Redis
-      if (username) {
+      if (cleanUser) {
         fetch('/api/user/trades', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            username,
+            userId: cleanUser,
             balance,
             positions,
             orders,
@@ -137,7 +158,7 @@ export function useTradeStore(username?: string) {
     } catch (e) {
       console.error('Failed to save trades', e);
     }
-  }, [balance, positions, orders, isLoaded, username]);
+  }, [balance, positions, orders, isLoaded, cleanUser]);
 
   // Periodic Midnight (11:59 PM) Pruning Check
   useEffect(() => {
@@ -188,11 +209,23 @@ export function useTradeStore(username?: string) {
     setPositions([]);
     setOrders([]);
     try {
-      localStorage.removeItem(getStorageKey('balance', username));
-      localStorage.removeItem(getStorageKey('positions', username));
-      localStorage.removeItem(getStorageKey('orders', username));
+      localStorage.removeItem(getStorageKey('balance', cleanUser));
+      localStorage.removeItem(getStorageKey('positions', cleanUser));
+      localStorage.removeItem(getStorageKey('orders', cleanUser));
     } catch {}
-  }, [username]);
+    if (cleanUser) {
+      fetch('/api/user/trades', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: cleanUser,
+          balance: INITIAL_DEMO_CAPITAL,
+          positions: [],
+          orders: [],
+        }),
+      }).catch(err => console.error('Cloud Redis reset error', err));
+    }
+  }, [cleanUser]);
 
   // Execute an order
   const placeOrder = useCallback((params: TradeOrderParams): { success: boolean; message: string } => {
