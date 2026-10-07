@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #F8FAFC;
+  --foreground: #0F172A;
+  --card: #FFFFFF;
+  --card-subtle: #F1F5F9;
+  --border: #E2E8F0;
+  --muted: #64748B;
+}
+
+.dark {
+  --background: #0B0E14;
+  --foreground: #F1F5F9;
+  --card: #0E121A;
+  --card-subtle: #141926;
+  --border: #1E2430;
+  --muted: #848E9C;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Custom Minimal Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
+/* Flash green / red on price tick updates */
+@keyframes flashGreen {
+  0% { background-color: rgba(0, 208, 156, 0.35); }
+  100% { background-color: transparent; }
+}
+
+@keyframes flashRed {
+  0% { background-color: rgba(235, 91, 60, 0.35); }
+  100% { background-color: transparent; }
+}
+
+.flash-green {
+  animation: flashGreen 0.8s ease-out;
+}
+
+.flash-red {
+  animation: flashRed 0.8s ease-out;
+}
+
+/* Tabular Numbers for stock prices */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
