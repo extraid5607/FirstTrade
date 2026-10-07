@@ -65,24 +65,33 @@ export const UserAuthModal: React.FC<UserAuthModalProps> = ({ isOpen, onClose })
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <div className="w-full max-w-md bg-white dark:bg-[#121622] rounded-2xl border border-slate-200 dark:border-[#222A3A] shadow-2xl overflow-hidden flex flex-col">
+    <div 
+      className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200"
+      onClick={onClose}
+    >
+      <div 
+        className="w-full max-w-md bg-white dark:bg-[#121622] rounded-2xl border border-slate-200 dark:border-[#263044] shadow-2xl overflow-hidden flex flex-col my-auto relative"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Modal Header */}
-        <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-[#1C2333] flex items-center justify-between bg-slate-50/60 dark:bg-[#0F131C]">
+        <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-[#1C2333] flex items-center justify-between bg-slate-50/80 dark:bg-[#0F131C]">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-[#00D09C] flex items-center justify-center border border-emerald-500/20 font-bold">
               <User className="w-5 h-5" />
             </div>
             <div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white">User Account & Profiles</h3>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">Keep trades and funds isolated per user</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">Switch profile or register unique account</p>
             </div>
           </div>
+          {/* Prominent Cut / Hide Close Button */}
           <button 
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#1A2030] transition-colors"
+            title="Hide / Close popup (Esc)"
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-[#1F2738] transition-colors border border-slate-200 dark:border-[#222A3A]"
           >
-            <X className="w-4 h-4" />
+            <X className="w-4 h-4 text-rose-500" />
+            <span>Hide</span>
           </button>
         </div>
 

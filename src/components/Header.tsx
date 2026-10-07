@@ -36,36 +36,6 @@ export const Header: React.FC<HeaderProps> = ({
   const { theme, toggleTheme } = useTheme();
   const { currentUser } = useAuth();
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<any[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [showSearchModal, setShowSearchModal] = useState(false);
-  const searchInputRef = useRef<HTMLInputElement>(null);
-
-  // Search autocomplete
-  useEffect(() => {
-    if (!searchQuery.trim()) {
-      setSearchResults([]);
-      return;
-    }
-
-    const timer = setTimeout(async () => {
-      setIsSearching(true);
-      try {
-        const res = await fetch(`/api/market/search?q=${encodeURIComponent(searchQuery)}`);
-        if (res.ok) {
-          const data = await res.json();
-          setSearchResults(data.slice(0, 8));
-        }
-      } catch (e) {
-        console.error('Search error', e);
-      } finally {
-        setIsSearching(false);
-      }
-    }, 300);
-
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
 
   const nifty = indices.find(i => i.symbol === 'NIFTY');
   const bankNifty = indices.find(i => i.symbol === 'BANKNIFTY');
@@ -85,9 +55,6 @@ export const Header: React.FC<HeaderProps> = ({
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="font-bold text-base tracking-tight text-slate-900 dark:text-white">FirstTrade</span>
-                <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-emerald-500/10 text-[#00D09C] border border-emerald-500/20">
-                  DEMO
-                </span>
               </div>
             </div>
           </div>
@@ -165,16 +132,6 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Right Section: Search & Virtual Balance & Theme Switcher */}
         <div className="flex items-center gap-2">
-          {/* Search Trigger */}
-          <button
-            onClick={() => setShowSearchModal(true)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-[#141824] hover:bg-slate-200 dark:hover:bg-[#1A2030] border border-slate-200 dark:border-[#22293A] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors text-xs"
-          >
-            <Search className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Search stocks, F&O...</span>
-            <kbd className="hidden sm:inline text-[10px] bg-slate-200 dark:bg-[#1E2433] px-1.5 py-0.5 rounded text-slate-600 dark:text-slate-400 border border-slate-300 dark:border-[#2B3448]">Ctrl+K</kbd>
-          </button>
-
           {/* Theme Toggle Button */}
           <button
             onClick={toggleTheme}
@@ -192,7 +149,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="flex items-center gap-2 bg-slate-100 dark:bg-[#141926] px-3 py-1.5 rounded-xl border border-slate-200 dark:border-[#21293B]">
             <Wallet className="w-4 h-4 text-[#00D09C]" />
             <div className="flex flex-col text-right">
-              <span className="text-[10px] uppercase font-semibold text-slate-500 dark:text-slate-400 leading-none">Demo Funds</span>
+              <span className="text-[10px] uppercase font-semibold text-slate-500 dark:text-slate-400 leading-none">Funds</span>
               <span className="text-xs font-mono font-bold text-slate-900 dark:text-white tabular-nums leading-tight">
                 ₹{portfolio.availableCash.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
               </span>
@@ -245,65 +202,6 @@ export const Header: React.FC<HeaderProps> = ({
         isOpen={showAuthModal}
         onClose={() => setShowAuthModal(false)}
       />
-
-      {/* Global Search Modal */}
-      {showSearchModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center pt-20 px-4">
-          <div className="w-full max-w-lg bg-white dark:bg-[#121622] rounded-2xl border border-slate-200 dark:border-[#262E42] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="p-3 border-b border-slate-200 dark:border-[#1E2536] flex items-center gap-3">
-              <Search className="w-4 h-4 text-slate-400" />
-              <input
-                ref={searchInputRef}
-                autoFocus
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search symbol (e.g. RELIANCE, TCS, NIFTY)..."
-                className="w-full bg-transparent text-sm text-slate-900 dark:text-white focus:outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500"
-              />
-              <button 
-                onClick={() => { setShowSearchModal(false); setSearchQuery(''); }}
-                className="p-1 rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#1E2536]"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="max-h-80 overflow-y-auto p-2 divide-y divide-slate-100 dark:divide-[#1B202F]">
-              {isSearching ? (
-                <div className="p-4 text-center text-xs text-slate-500 dark:text-slate-400">Searching market instruments...</div>
-              ) : searchResults.length > 0 ? (
-                searchResults.map((item, idx) => (
-                  <div
-                    key={idx}
-                    onClick={() => {
-                      onSelectSymbol(item.symbol);
-                      setShowSearchModal(false);
-                      setSearchQuery('');
-                    }}
-                    className="p-2.5 flex items-center justify-between hover:bg-slate-100 dark:hover:bg-[#1A2030] rounded-lg cursor-pointer transition-colors"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-xs text-slate-900 dark:text-white">{item.symbol}</span>
-                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-100 dark:bg-[#202738] text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-[#2C354A]">
-                          {item.segment}
-                        </span>
-                      </div>
-                      <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-xs">{item.name}</div>
-                    </div>
-                    <span className="text-xs font-mono text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">Select</span>
-                  </div>
-                ))
-              ) : searchQuery ? (
-                <div className="p-4 text-center text-xs text-slate-500">No instruments found matching "{searchQuery}"</div>
-              ) : (
-                <div className="p-4 text-center text-xs text-slate-400 dark:text-slate-500">Type any stock or index name to search</div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </header>
   );
 };
