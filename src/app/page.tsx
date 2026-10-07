@@ -12,17 +12,26 @@ import { MobileNav, MobileTab } from '@/components/MobileNav';
 import { useTradeStore } from '@/lib/tradeStore';
 import { Quote } from '@/types/market';
 import { TradingSegment, OrderSide } from '@/types/trading';
-import { BarChart2, Layers, Briefcase, Clock, ShieldCheck, Zap } from 'lucide-react';
+import { BarChart2, Layers, Briefcase, Clock, ShieldCheck, Zap, ArrowLeft } from 'lucide-react';
 
 export default function TerminalPage() {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [selectedSymbol, setSelectedSymbol] = useState<string>('NIFTY');
   const [centerView, setCenterView] = useState<'CHART' | 'OPTIONS'>('CHART');
   const [bottomTab, setBottomTab] = useState<'POSITIONS' | 'ORDERS'>('POSITIONS');
-  const [mobileTab, setMobileTab] = useState<MobileTab>('CHART');
+  const [mobileTab, setMobileTab] = useState<MobileTab>('WATCHLIST');
+
+  // Navigation & Back tracking refs
+  const mobileTabRef = useRef<MobileTab>('WATCHLIST');
+  mobileTabRef.current = mobileTab;
+  const isOrderPadOpenRef = useRef(false);
+  const centerViewRef = useRef<'CHART' | 'OPTIONS'>('CHART');
+  centerViewRef.current = centerView;
 
   // Order Pad State
   const [isOrderPadOpen, setIsOrderPadOpen] = useState(false);
+  isOrderPadOpenRef.current = isOrderPadOpen;
+
   const [orderPadInitial, setOrderPadInitial] = useState<{
     symbol: string;
     side: OrderSide;
@@ -136,6 +145,69 @@ export default function TerminalPage() {
     lotSize: selectedSymbol === 'SENSEX' ? 20 : selectedSymbol === 'BANKNIFTY' ? 30 : 65,
   };
 
+  // Smart Navigation to tabs with Browser History integration
+  const navigateToTab = useCallback((tab: MobileTab) => {
+    setMobileTab(prev => {
+      if (prev === tab) return prev;
+      if (typeof window !== 'undefined' && tab !== 'WATCHLIST') {
+        try {
+          window.history.pushState({ tab }, '');
+        } catch {}
+      }
+      return tab;
+    });
+  }, []);
+
+  // Smart Back Handler
+  const handleSmartBack = useCallback(() => {
+    if (isOrderPadOpen) {
+      setIsOrderPadOpen(false);
+      return;
+    }
+    if (mobileTab !== 'WATCHLIST') {
+      setMobileTab('WATCHLIST');
+      return;
+    }
+    // If on WATCHLIST, trigger browser back to allow closing / exiting app
+    if (typeof window !== 'undefined') {
+      window.history.back();
+    }
+  }, [isOrderPadOpen, mobileTab]);
+
+  // Listen for browser/phone Back Button (popstate)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    try {
+      window.history.replaceState({ tab: 'WATCHLIST' }, '');
+    } catch {}
+
+    const handlePopState = () => {
+      // 1. If OrderPad modal is open, back closes modal
+      if (isOrderPadOpenRef.current) {
+        setIsOrderPadOpen(false);
+        return;
+      }
+
+      // 2. If on any tab other than WATCHLIST, back returns to WATCHLIST
+      if (mobileTabRef.current !== 'WATCHLIST') {
+        setMobileTab('WATCHLIST');
+        return;
+      }
+
+      // 3. If on desktop and in OPTIONS view, return to CHART
+      if (centerViewRef.current === 'OPTIONS') {
+        setCenterView('CHART');
+        return;
+      }
+
+      // 4. If already on WATCHLIST, native browser pop will exit/close app
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
   const handleOpenOrderPad = (
     symbol: string,
     side: OrderSide,
@@ -157,13 +229,16 @@ export default function TerminalPage() {
       lotSize,
       price: initialPrice,
     });
+    try {
+      window.history.pushState({ modal: 'orderPad' }, '');
+    } catch {}
     setIsOrderPadOpen(true);
   };
 
   const handleOpenOptionChain = (symbol: string) => {
     setSelectedSymbol(symbol);
     setCenterView('OPTIONS');
-    setMobileTab('OPTIONS');
+    navigateToTab('OPTIONS');
   };
 
   return (
@@ -175,7 +250,7 @@ export default function TerminalPage() {
         onResetAccount={resetAccount}
         onSelectSymbol={(sym) => {
           setSelectedSymbol(sym);
-          setMobileTab('CHART');
+          navigateToTab('CHART');
         }}
       />
 
@@ -306,13 +381,40 @@ export default function TerminalPage() {
 
       {/* MOBILE LAYOUT (< md) */}
       <div className="md:hidden flex-1 flex flex-col overflow-hidden">
+        {/* Mobile Smart Back Header (shown whenever on any tab other than Watchlist) */}
+        {mobileTab !== 'WATCHLIST' && (
+          <div className="h-10 px-3 bg-white dark:bg-[#0E121A] border-b border-slate-200 dark:border-[#1E2430] flex items-center justify-between transition-colors flex-shrink-0 z-20">
+            <button
+              onClick={handleSmartBack}
+              className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-200 hover:text-[#00D09C] py-1 px-2 -ml-1 rounded-lg bg-slate-100 dark:bg-[#141926] border border-slate-200 dark:border-[#1F2636] transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4 text-[#00D09C]" />
+              <span>Watchlist</span>
+            </button>
+
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-900 dark:text-white">
+                {mobileTab === 'CHART' && `${selectedSymbol} Chart`}
+                {mobileTab === 'OPTIONS' && `${selectedSymbol} Option Chain`}
+                {mobileTab === 'POSITIONS' && 'Positions'}
+                {mobileTab === 'ORDERS' && 'Order Book'}
+              </span>
+              {mobileTab === 'CHART' && currentQuote?.ltp && (
+                <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/15 text-[#00D09C] font-mono font-bold">
+                  ₹{currentQuote.ltp.toFixed(1)}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         {mobileTab === 'WATCHLIST' && (
           <Watchlist
             quotes={quotes}
             selectedSymbol={selectedSymbol}
             onSelectSymbol={(sym) => {
               setSelectedSymbol(sym);
-              setMobileTab('CHART');
+              navigateToTab('CHART');
             }}
             onOpenOrderPad={(sym, side, seg) => handleOpenOrderPad(sym, side, seg)}
             onOpenOptionChain={handleOpenOptionChain}
@@ -324,7 +426,7 @@ export default function TerminalPage() {
             <TradingViewChart
               symbol={selectedSymbol}
               currentQuote={currentQuote}
-              onOpenOptionChain={() => setMobileTab('OPTIONS')}
+              onOpenOptionChain={() => navigateToTab('OPTIONS')}
               onTrade={(side) => handleOpenOrderPad(selectedSymbol, side, currentQuote.segment === 'INDEX' ? 'OPTION' : 'EQUITY')}
             />
           </div>
@@ -374,7 +476,7 @@ export default function TerminalPage() {
         {/* Mobile Bottom Navigation */}
         <MobileNav
           activeTab={mobileTab}
-          onSelectTab={setMobileTab}
+          onSelectTab={navigateToTab}
           openPositionsCount={positions.length}
         />
       </div>

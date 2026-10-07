@@ -24,39 +24,15 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
-  const ema9SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
-  const ema21SeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
 
   const lastCandleRef = useRef<CandlestickData | null>(null);
   const rawCandlesRef = useRef<Candle[]>([]);
 
   const [chartInterval, setChartInterval] = useState<'1m' | '5m' | '15m' | '1h' | '1d'>('5m');
-  const [showEMA, setShowEMA] = useState(true);
   const [showVolume, setShowVolume] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [isTickLive, setIsTickLive] = useState(true);
   const [lastTickTime, setLastTickTime] = useState<number>(Date.now());
-
-  // Helper to calculate EMA
-  const calculateEMA = (candles: Candle[], period: number) => {
-    if (candles.length < period) return [];
-    const k = 2 / (period + 1);
-    let ema = candles[0].close;
-    const result = [];
-
-    for (let i = 0; i < candles.length; i++) {
-      if (i === 0) {
-        ema = candles[i].close;
-      } else {
-        ema = candles[i].close * k + ema * (1 - k);
-      }
-      result.push({
-        time: candles[i].time as Time,
-        value: Math.round(ema * 100) / 100,
-      });
-    }
-    return result;
-  };
 
   // 1. Initial Chart Creation & Historical Load
   useEffect(() => {
@@ -147,21 +123,6 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
         });
         candleSeriesRef.current = candleSeries;
 
-        // EMA Lines
-        const ema9Series = chart.addLineSeries({
-          color: '#38BDF8',
-          lineWidth: 1,
-          title: 'EMA 9',
-        });
-        ema9SeriesRef.current = ema9Series;
-
-        const ema21Series = chart.addLineSeries({
-          color: '#F59E0B',
-          lineWidth: 1,
-          title: 'EMA 21',
-        });
-        ema21SeriesRef.current = ema21Series;
-
         // Set Data
         rawCandlesRef.current = candles;
         const formattedCandles: CandlestickData[] = candles.map(c => ({
@@ -185,11 +146,6 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
             color: c.close >= c.open ? 'rgba(0, 208, 156, 0.25)' : 'rgba(235, 91, 60, 0.25)',
           }));
           volumeSeries.setData(volData);
-        }
-
-        if (showEMA) {
-          ema9Series.setData(calculateEMA(candles, 9));
-          ema21Series.setData(calculateEMA(candles, 21));
         }
 
         chart.timeScale().fitContent();
@@ -221,7 +177,7 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
         chartRef.current = null;
       }
     };
-  }, [symbol, chartInterval, showEMA, showVolume, theme]);
+  }, [symbol, chartInterval, showVolume, theme]);
 
   // Dynamic Theme Options Update without reloading
   useEffect(() => {
@@ -317,12 +273,6 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
 
           candleSeriesRef.current.setData(formatted);
           lastCandleRef.current = formatted[formatted.length - 1];
-          rawCandlesRef.current = serverCandles;
-
-          if (showEMA && ema9SeriesRef.current && ema21SeriesRef.current) {
-            ema9SeriesRef.current.setData(calculateEMA(serverCandles, 9));
-            ema21SeriesRef.current.setData(calculateEMA(serverCandles, 21));
-          }
         }
       } catch (err) {
         // Silent catch for background polling
@@ -330,7 +280,7 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
     }, 4000);
 
     return () => window.clearInterval(syncInterval);
-  }, [symbol, chartInterval, showEMA, currentQuote?.ltp]);
+  }, [symbol, chartInterval, currentQuote?.ltp]);
 
   return (
     <div className="flex flex-col h-full bg-white dark:bg-[#0E121A] relative select-none transition-colors">
@@ -385,18 +335,6 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
               </button>
             ))}
           </div>
-
-          {/* Indicator toggles */}
-          <button
-            onClick={() => setShowEMA(!showEMA)}
-            className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg border transition-colors ${
-              showEMA
-                ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25'
-                : 'bg-slate-100 dark:bg-[#151A26] text-slate-500 dark:text-slate-400 border-slate-200 dark:border-[#202738] hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            EMA (9/21)
-          </button>
 
           {/* Option Chain Button */}
           {onOpenOptionChain && (
