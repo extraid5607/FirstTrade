@@ -174,16 +174,42 @@ const MONTH_NAMES_SHORT = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG
 const MONTH_NAMES_TITLE = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /**
- * Returns current nearest expiry date for known Indian index symbols
+ * Dynamically calculates the next upcoming weekday date in YYYY-MM-DD (IST).
+ * If today is that weekday and time is past 15:30 IST, rolls to the following week.
+ */
+export function getNextUpcomingWeekday(targetDayOfWeek: number, now: Date = new Date()): string {
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const istNow = new Date(now.getTime() + istOffset + now.getTimezoneOffset() * 60 * 1000);
+
+  const currentDay = istNow.getDay(); // 0: Sun, 1: Mon, ..., 6: Sat
+  const currentHours = istNow.getHours();
+  const currentMinutes = istNow.getMinutes();
+
+  let diff = targetDayOfWeek - currentDay;
+  if (diff < 0 || (diff === 0 && (currentHours > 15 || (currentHours === 15 && currentMinutes >= 30)))) {
+    diff += 7;
+  }
+
+  const targetDate = new Date(istNow);
+  targetDate.setDate(istNow.getDate() + diff);
+
+  const y = targetDate.getFullYear();
+  const m = String(targetDate.getMonth() + 1).padStart(2, '0');
+  const d = String(targetDate.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * Returns current nearest upcoming expiry date for known Indian index symbols
  */
 export function getDefaultExpiry(symbol: string): string {
   const sym = (symbol || '').toUpperCase();
-  if (sym === 'SENSEX') return '2026-10-08';
-  if (sym === 'NIFTY') return '2026-10-13';
-  if (sym === 'BANKNIFTY') return '2026-10-27';
-  if (sym === 'FINNIFTY') return '2026-10-14';
-  if (sym === 'MIDCPNIFTY') return '2026-10-12';
-  return '2026-10-08';
+  if (sym === 'MIDCPNIFTY') return getNextUpcomingWeekday(1); // Monday
+  if (sym === 'FINNIFTY') return getNextUpcomingWeekday(2);   // Tuesday
+  if (sym === 'BANKNIFTY') return getNextUpcomingWeekday(3);  // Wednesday
+  if (sym === 'NIFTY') return getNextUpcomingWeekday(4);      // Thursday
+  if (sym === 'SENSEX') return getNextUpcomingWeekday(5);     // Friday
+  return getNextUpcomingWeekday(4);                           // Default Thursday
 }
 
 /**

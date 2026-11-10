@@ -58,6 +58,7 @@ export default function TerminalPage() {
     placeOrder,
     closePosition,
     closeAllPositions,
+    clearExpiredPositions,
     cancelOrder,
     updatePrices,
     resetAccount,
@@ -390,6 +391,7 @@ export default function TerminalPage() {
                   positions={positions}
                   onClosePosition={closePosition}
                   onCloseAllPositions={closeAllPositions}
+                  onClearExpired={clearExpiredPositions}
                 />
               )}
               {bottomTab === 'ORDERS' && (
@@ -479,6 +481,7 @@ export default function TerminalPage() {
               positions={positions}
               onClosePosition={closePosition}
               onCloseAllPositions={closeAllPositions}
+              onClearExpired={clearExpiredPositions}
             />
           </div>
         )}

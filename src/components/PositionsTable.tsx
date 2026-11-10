@@ -2,24 +2,30 @@
 
 import React, { useState } from 'react';
 import { Position } from '@/types/trading';
-import { LogOut, ArrowUpRight, ArrowDownRight, ShieldAlert, CheckCircle2, Check, Clock } from 'lucide-react';
+import { LogOut, ArrowUpRight, ArrowDownRight, ShieldAlert, CheckCircle2, Check, Clock, Trash2 } from 'lucide-react';
 import { formatExpiryBadge, formatExpiryFull } from '@/lib/constants';
+import { isOptionExpired } from '@/lib/expiry';
 
 interface PositionsTableProps {
   positions: Position[];
   onClosePosition: (id: string) => void;
   onCloseAllPositions: () => void;
+  onClearExpired?: () => void;
 }
 
 export const PositionsTable: React.FC<PositionsTableProps> = ({
   positions,
   onClosePosition,
   onCloseAllPositions,
+  onClearExpired,
 }) => {
   const [filter, setFilter] = useState<'ALL' | 'OPEN' | 'CLOSED'>('ALL');
 
   const openPositions = positions.filter(p => p.status !== 'CLOSED');
   const closedPositions = positions.filter(p => p.status === 'CLOSED');
+  const hasExpiredPositions = positions.some(
+    p => p.segment === 'OPTION' && isOptionExpired(p.contractDetails?.expiryDate)
+  );
 
   const totalUnrealizedPnL = openPositions.reduce((acc, p) => acc + p.unrealizedPnL, 0);
   const totalRealizedPnL = closedPositions.reduce((acc, p) => acc + (p.realizedPnL || 0), 0);
@@ -112,6 +118,17 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({
             </span>
           </div>
 
+          {hasExpiredPositions && onClearExpired && (
+            <button
+              onClick={onClearExpired}
+              className="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-[11px] font-bold flex items-center gap-1 transition-colors"
+              title="Delete all expired options and refund margin"
+            >
+              <Trash2 className="w-3 h-3" />
+              <span>Clear Expired</span>
+            </button>
+          )}
+
           {openPositions.length > 0 && (
             <button
               onClick={() => {
@@ -136,6 +153,7 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({
           const isProfit = pnl >= 0;
 
           const isOption = pos.segment === 'OPTION' && !!pos.contractDetails?.strikePrice;
+          const isExpired = isOption && isOptionExpired(pos.contractDetails?.expiryDate);
           const expBadge = isOption ? formatExpiryBadge(pos.contractDetails?.expiryDate, pos.symbol) : '';
           const expFull = isOption ? formatExpiryFull(pos.contractDetails?.expiryDate, pos.symbol) : '';
 
@@ -160,6 +178,11 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({
                     {expBadge && (
                       <span className="px-1.5 py-0.2 rounded text-[9px] font-bold font-mono bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30">
                         {expBadge}
+                      </span>
+                    )}
+                    {isExpired && (
+                      <span className="px-1.5 py-0.2 rounded text-[9px] font-bold font-mono bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30">
+                        EXPIRED
                       </span>
                     )}
                   </div>
@@ -220,9 +243,13 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({
                   ) : (
                     <button
                       onClick={() => onClosePosition(pos.id)}
-                      className="px-3 py-1 rounded bg-rose-500/10 hover:bg-rose-500 text-[#EB5B3C] hover:text-white border border-rose-500/20 text-[11px] font-bold transition-all shadow-xs"
+                      className={`px-3 py-1 rounded text-[11px] font-bold transition-all shadow-xs ${
+                        isExpired
+                          ? 'bg-amber-500/15 hover:bg-amber-500 text-amber-600 hover:text-black border border-amber-500/30'
+                          : 'bg-rose-500/10 hover:bg-rose-500 text-[#EB5B3C] hover:text-white border border-rose-500/20'
+                      }`}
                     >
-                      Exit
+                      {isExpired ? 'Clear' : 'Exit'}
                     </button>
                   )}
                 </div>
@@ -253,6 +280,7 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({
               const isProfit = pnl >= 0;
 
               const isOption = pos.segment === 'OPTION' && !!pos.contractDetails?.strikePrice;
+              const isExpired = isOption && isOptionExpired(pos.contractDetails?.expiryDate);
               const expBadge = isOption ? formatExpiryBadge(pos.contractDetails?.expiryDate, pos.symbol) : '';
               const expFull = isOption ? formatExpiryFull(pos.contractDetails?.expiryDate, pos.symbol) : '';
 
@@ -294,6 +322,11 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({
                           {expBadge && (
                             <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold font-mono bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30 shadow-xs">
                               {expBadge}
+                            </span>
+                          )}
+                          {isExpired && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold font-mono bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 shadow-xs">
+                              EXPIRED
                             </span>
                           )}
                         </div>
@@ -368,9 +401,13 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({
                     ) : (
                       <button
                         onClick={() => onClosePosition(pos.id)}
-                        className="px-2.5 py-1 rounded bg-slate-100 dark:bg-[#202738] hover:bg-rose-600 hover:text-white text-slate-700 dark:text-slate-300 text-[11px] font-semibold transition-all border border-slate-200 dark:border-transparent"
+                        className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all border ${
+                          isExpired
+                            ? 'bg-amber-500/15 hover:bg-amber-500 text-amber-600 hover:text-black border-amber-500/30'
+                            : 'bg-slate-100 dark:bg-[#202738] hover:bg-rose-600 hover:text-white text-slate-700 dark:text-slate-300 border-slate-200 dark:border-transparent'
+                        }`}
                       >
-                        Exit
+                        {isExpired ? 'Clear' : 'Exit'}
                       </button>
                     )}
                   </td>

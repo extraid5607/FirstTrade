@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Order, Position, PortfolioSummary, OrderSide, OrderProduct, OrderType, TradingSegment } from '@/types/trading';
 import { INITIAL_DEMO_CAPITAL, getDefaultExpiry } from '@/lib/constants';
+import { cleanAndSettlePositions, isOptionExpired } from '@/lib/expiry';
 
 const getStorageKey = (key: string, userId?: string) => {
   if (!userId) return `first_trade_guest_${key}`;
@@ -84,6 +85,11 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
         try { curOrd = JSON.parse(localOrd); } catch {}
       }
 
+      // Clean local positions immediately (auto-delete past expired options/MIS, auto-settle today's expiry)
+      const cleanedLocal = cleanAndSettlePositions(curPos, curBal);
+      curPos = cleanedLocal.cleanPositions;
+      curBal = cleanedLocal.newBalance;
+
       if (isCancelled) return;
 
       setBalance(curBal);
@@ -96,16 +102,10 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
           const res = await fetch(`/api/user/trades?userId=${encodeURIComponent(cleanUser)}`);
           if (res.ok && !isCancelled) {
             const data = await res.json();
-            if (data.balance !== undefined) {
-              curBal = data.balance;
-              setBalance(data.balance);
-              localStorage.setItem(balanceKey, JSON.stringify(data.balance));
-            }
+            let cloudBal = data.balance !== undefined ? data.balance : curBal;
+
             if (data.positions && Array.isArray(data.positions)) {
-              const validPos = data.positions.filter((p: Position) => {
-                if (p.status === 'CLOSED') return isToday(p.closedAt || p.openedAt);
-                return true;
-              }).map((p: Position) => {
+              const mappedPos = data.positions.map((p: Position) => {
                 if (p.segment === 'OPTION' && p.contractDetails && (!p.contractDetails.expiryDate || p.contractDetails.expiryDate === 'CURRENT')) {
                   return {
                     ...p,
@@ -118,21 +118,40 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
                 return p;
               });
 
-              // Guard: If cloud has positions, OR if local was also empty, update with cloud
-              // If cloud is empty but local has positions, preserve local positions!
-              if (validPos.length > 0 || curPos.length === 0) {
-                curPos = validPos;
-                setPositions(validPos);
-                localStorage.setItem(positionsKey, JSON.stringify(validPos));
+              // Clean and settle cloud positions immediately
+              const cleanedCloud = cleanAndSettlePositions(mappedPos, cloudBal);
+              curPos = cleanedCloud.cleanPositions;
+              curBal = cleanedCloud.newBalance;
+
+              setPositions(curPos);
+              setBalance(curBal);
+              localStorage.setItem(positionsKey, JSON.stringify(curPos));
+              localStorage.setItem(balanceKey, JSON.stringify(curBal));
+
+              // If expired positions were purged or settled from cloud, sync clean state to cloud
+              if (cleanedCloud.changed) {
+                fetch('/api/user/trades', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    userId: cleanUser,
+                    balance: curBal,
+                    positions: curPos,
+                    orders: curOrd,
+                  }),
+                }).catch(() => {});
               }
+            } else if (data.balance !== undefined) {
+              curBal = data.balance;
+              setBalance(data.balance);
+              localStorage.setItem(balanceKey, JSON.stringify(data.balance));
             }
+
             if (data.orders && Array.isArray(data.orders)) {
               const validOrd = data.orders.filter((o: Order) => isToday(o.timestamp));
-              if (validOrd.length > 0 || curOrd.length === 0) {
-                curOrd = validOrd;
-                setOrders(validOrd);
-                localStorage.setItem(ordersKey, JSON.stringify(validOrd));
-              }
+              curOrd = validOrd;
+              setOrders(validOrd);
+              localStorage.setItem(ordersKey, JSON.stringify(validOrd));
             }
           }
         } catch (e) {
@@ -220,21 +239,25 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
     }
   }, [balance, positions, orders, isLoaded, cleanUser]);
 
-  // Periodic Midnight (11:59 PM) Pruning Check
+  // Periodic Expiry & Midnight Auto-Pruning Check (every 10 seconds)
   useEffect(() => {
-    const midnightInterval = setInterval(() => {
-      setPositions(prev => prev.filter(p => {
-        if (p.status === 'CLOSED') {
-          return isToday(p.closedAt || p.openedAt);
+    const pruneInterval = setInterval(() => {
+      setPositions(prev => {
+        const cleaned = cleanAndSettlePositions(prev, balance);
+        if (cleaned.changed) {
+          if (cleaned.newBalance !== balance) {
+            setBalance(cleaned.newBalance);
+          }
+          return cleaned.cleanPositions;
         }
-        return true;
-      }));
+        return prev;
+      });
 
       setOrders(prev => prev.filter(o => isToday(o.timestamp)));
-    }, 30000); // Check every 30 seconds
+    }, 10000); // Check every 10 seconds
 
-    return () => clearInterval(midnightInterval);
-  }, []);
+    return () => clearInterval(pruneInterval);
+  }, [balance]);
 
   // Calculate required margin for an order
   const calculateMargin = useCallback((params: TradeOrderParams): number => {
@@ -467,13 +490,13 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
     };
   }, [balance, calculateMargin]);
 
-  // Update positions with live market prices (only open positions)
+  // Update positions with live market prices (only open, non-expired positions)
   const updatePrices = useCallback((priceMap: Record<string, number>) => {
     setPositions(prev => {
       let hasChanges = false;
       const updated = prev.map(p => {
-        // Don't update prices for closed positions
-        if (p.status === 'CLOSED') return p;
+        // Don't update prices for closed or expired positions
+        if (p.status === 'CLOSED' || isOptionExpired(p.contractDetails?.expiryDate)) return p;
 
         let currentLtp = p.currentPrice;
 
@@ -591,6 +614,28 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
     positions.filter(p => p.status !== 'CLOSED').forEach(p => closePosition(p.id));
   }, [positions, closePosition]);
 
+  // Directly delete an individual position and refund its margin
+  const deletePosition = useCallback((positionId: string) => {
+    setPositions(prev => {
+      const pos = prev.find(p => p.id === positionId);
+      if (pos && pos.status !== 'CLOSED' && pos.marginUsed > 0) {
+        setBalance(b => b + pos.marginUsed);
+      }
+      return prev.filter(p => p.id !== positionId);
+    });
+  }, []);
+
+  // Clear all expired options and past-day intraday positions immediately
+  const clearExpiredPositions = useCallback(() => {
+    setPositions(prev => {
+      const cleaned = cleanAndSettlePositions(prev, balance);
+      if (cleaned.newBalance !== balance) {
+        setBalance(cleaned.newBalance);
+      }
+      return cleaned.cleanPositions;
+    });
+  }, [balance]);
+
   // Cancel pending order
   const cancelOrder = useCallback((orderId: string) => {
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'CANCELLED' } : o));
@@ -624,6 +669,8 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
     placeOrder,
     closePosition,
     closeAllPositions,
+    deletePosition,
+    clearExpiredPositions,
     cancelOrder,
     updatePrices,
     resetAccount,

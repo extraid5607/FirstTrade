@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { WATCHLIST_INSTRUMENTS } from '@/lib/constants';
+import { isOptionExpired } from '@/lib/expiry';
 
 interface PositionQuery {
   id?: string;
@@ -27,12 +28,14 @@ export async function POST(req: NextRequest) {
 
     const priceMap: Record<string, number> = {};
 
-    // Group options by underlying symbol and expiry date
+    // Group options by underlying symbol and expiry date (skip expired contracts)
     const optionGroups = new Map<string, { symbol: string; expiry?: string }>();
     positions.forEach(p => {
       if (p.segment === 'OPTION' && p.symbol) {
         const sym = p.symbol.toUpperCase();
         const exp = p.expiry || p.contractDetails?.expiryDate || '';
+        // If option is already expired, don't query live chain
+        if (isOptionExpired(exp)) return;
         const key = `${sym}|${exp}`;
         if (!optionGroups.has(key)) {
           optionGroups.set(key, { symbol: sym, expiry: exp });
@@ -102,6 +105,13 @@ export async function POST(req: NextRequest) {
       const exp = pos.expiry || pos.contractDetails?.expiryDate || '';
 
       if (pos.segment === 'OPTION' && strike && optionType) {
+        if (isOptionExpired(exp)) {
+          // Expired option: do not query or fallback to current week
+          priceMap[`${sym}_${strike}_${optionType}`] = 0;
+          if (pos.id) priceMap[pos.id] = 0;
+          continue;
+        }
+
         const key = `${sym}|${exp}`;
         // Fallback to symbol without expiry if not found
         const chain = optionChains[key] || optionChains[`${sym}|`] || [];
