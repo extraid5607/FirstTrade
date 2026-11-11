@@ -314,10 +314,11 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
   const placeOrder = useCallback((params: TradeOrderParams): { success: boolean; message: string } => {
     const requiredMargin = calculateMargin(params);
 
-    if (params.side === 'BUY' && requiredMargin > balance) {
+    // Require sufficient available margin for both BUY and SELL
+    if (requiredMargin > balance) {
       return {
         success: false,
-        message: `Insufficient margin! Required: ₹${requiredMargin.toLocaleString('en-IN')}, Available: ₹${balance.toLocaleString('en-IN')}`
+        message: `Insufficient margin! Required: ₹${requiredMargin.toLocaleString('en-IN', { maximumFractionDigits: 0 })}, Available: ₹${balance.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
       };
     }
 
@@ -348,9 +349,6 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
       return { success: true, message: `Limit Order placed successfully for ${params.symbol} at ₹${params.price}` };
     }
 
-    // Execute immediately and update positions & cash
-    setBalance(prev => prev - (params.side === 'BUY' ? requiredMargin : -requiredMargin * 0.5));
-
     setPositions(prev => {
       // Find matching open position by symbol, segment, product, and contract details
       const existingIdx = prev.findIndex(p => {
@@ -370,7 +368,9 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
         const updated = [...prev];
 
         if (existing.side === params.side) {
-          // Adding to existing side
+          // Adding to existing position: Block additional requiredMargin from available cash
+          setBalance(b => b - requiredMargin);
+
           const totalQty = existing.quantity + params.quantity;
           const newAvgPrice = (existing.averagePrice * existing.quantity + params.price * params.quantity) / totalQty;
           const newMargin = existing.marginUsed + requiredMargin;
@@ -383,18 +383,21 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
           };
           return updated;
         } else {
-          // Reducing or exiting position
+          // Reducing or exiting position (opposite side order)
           if (params.quantity <= existing.quantity) {
             const diffQty = existing.quantity - params.quantity;
             const realizedTradePnL = existing.side === 'BUY'
               ? (params.price - existing.averagePrice) * params.quantity
               : (existing.averagePrice - params.price) * params.quantity;
 
-            // Refund cash balance
-            setBalance(b => b + (existing.marginUsed * (params.quantity / existing.quantity)) + realizedTradePnL);
+            const ratio = params.quantity / existing.quantity;
+            const releasedMargin = existing.marginUsed * ratio;
+
+            // Refund blocked margin for the exited portion + realized P&L
+            setBalance(b => b + releasedMargin + realizedTradePnL);
 
             if (diffQty === 0) {
-              // Mark as CLOSED rather than removing so PnL stays visible for today
+              // Full exit: Mark as CLOSED
               updated[existingIdx] = {
                 ...existing,
                 quantity: 0,
@@ -408,22 +411,26 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
               };
               return updated;
             } else {
+              // Partial exit: Keep remaining quantity and margin
               updated[existingIdx] = {
                 ...existing,
                 quantity: diffQty,
                 realizedPnL: existing.realizedPnL + realizedTradePnL,
-                marginUsed: existing.marginUsed * (diffQty / existing.quantity),
+                marginUsed: existing.marginUsed - releasedMargin,
               };
               return updated;
             }
           } else {
-            // Flipped to opposite side
+            // Flipped to opposite side: Close existing, open excess
             const excessQty = params.quantity - existing.quantity;
             const realizedTradePnL = existing.side === 'BUY'
               ? (params.price - existing.averagePrice) * existing.quantity
               : (existing.averagePrice - params.price) * existing.quantity;
 
-            setBalance(b => b + existing.marginUsed + realizedTradePnL);
+            const newMargin = calculateMargin({ ...params, quantity: excessQty });
+
+            // Refund closed position margin & P&L, and block newMargin for the excess portion
+            setBalance(b => b + existing.marginUsed + realizedTradePnL - newMargin);
 
             // Close existing position
             const closedPos: Position = {
@@ -451,7 +458,7 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
               unrealizedPnL: 0,
               unrealizedPnLPerc: 0,
               realizedPnL: 0,
-              marginUsed: calculateMargin({ ...params, quantity: excessQty }),
+              marginUsed: newMargin,
               openedAt: Date.now(),
               status: 'OPEN',
               contractDetails: params.contractDetails,
@@ -461,7 +468,9 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
           }
         }
       } else {
-        // Create new position
+        // Brand new position: Block requiredMargin from available cash
+        setBalance(b => b - requiredMargin);
+
         const newPos: Position = {
           id: 'POS-' + Math.random().toString(36).substring(2, 9).toUpperCase(),
           symbol: params.symbol,
