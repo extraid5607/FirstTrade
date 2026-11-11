@@ -537,6 +537,7 @@ export default function TerminalPage() {
         initialPrice={orderPadInitial.price}
         currentQuote={currentQuote}
         availableBalance={portfolio.availableCash}
+        positions={positions}
         onPlaceOrder={placeOrder}
       />
     </div>

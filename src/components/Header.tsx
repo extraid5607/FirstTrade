@@ -155,6 +155,15 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             </div>
 
+            {portfolio.usedMargin > 0 && (
+              <div className="hidden sm:flex flex-col text-right pl-2 border-l border-slate-200 dark:border-[#21293B]">
+                <span className="text-[10px] uppercase font-semibold text-slate-500 dark:text-slate-400 leading-none">Margin</span>
+                <span className="text-xs font-mono font-bold text-amber-600 dark:text-amber-400 tabular-nums leading-tight">
+                  ₹{portfolio.usedMargin.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                </span>
+              </div>
+            )}
+
             {/* Total P&L badge */}
             <div className={`ml-1 px-2 py-0.5 rounded text-[11px] font-mono font-bold tabular-nums flex items-center gap-0.5 ${
               portfolio.totalUnrealizedPnL >= 0 

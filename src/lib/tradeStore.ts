@@ -1,32 +1,21 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Order, Position, PortfolioSummary, OrderSide, OrderProduct, OrderType, TradingSegment } from '@/types/trading';
+import { Order, Position, PortfolioSummary, OrderSide, OrderProduct, OrderType, TradingSegment, TradeOrderParams } from '@/types/trading';
 import { INITIAL_DEMO_CAPITAL, getDefaultExpiry } from '@/lib/constants';
 import { cleanAndSettlePositions, isOptionExpired } from '@/lib/expiry';
+import {
+  calculatePortfolioMargin,
+  calculateOrderMarginRequirement,
+  isSameContract,
+} from '@/lib/marginEngine';
 
 const getStorageKey = (key: string, userId?: string) => {
   if (!userId) return `first_trade_guest_${key}`;
   return `first_trade_${userId.trim().toLowerCase()}_${key}`;
 };
 
-export interface TradeOrderParams {
-  symbol: string;
-  name: string;
-  segment: TradingSegment;
-  side: OrderSide;
-  product: OrderProduct;
-  type: OrderType;
-  quantity: number;
-  price: number;
-  triggerPrice?: number;
-  contractDetails?: {
-    strikePrice?: number;
-    optionType?: 'CE' | 'PE';
-    expiryDate?: string;
-    lotSize?: number;
-  };
-}
+export type { TradeOrderParams };
 
 // Check if a timestamp occurred on the current calendar day (before 11:59:59 PM)
 export function isToday(timestamp?: number): boolean {
@@ -90,6 +79,23 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
       curPos = cleanedLocal.cleanPositions;
       curBal = cleanedLocal.newBalance;
 
+      // Rebalance portfolio margin with Straddle/Strangle hedge benefit
+      const localOpen = curPos.filter(p => p.status !== 'CLOSED');
+      const localMarginRes = calculatePortfolioMargin(localOpen);
+      const localOldMargin = localOpen.reduce((sum, p) => sum + p.marginUsed, 0);
+      if (localMarginRes.totalMargin !== localOldMargin) {
+        curBal += (localOldMargin - localMarginRes.totalMargin);
+        curPos = curPos.map(p => {
+          if (p.status === 'CLOSED') return p;
+          return {
+            ...p,
+            marginUsed: localMarginRes.positionMargins[p.id] !== undefined ? localMarginRes.positionMargins[p.id] : p.marginUsed,
+            isHedged: localMarginRes.hedgedLegIds.has(p.id),
+            hedgeBenefit: localMarginRes.hedgeNotes[p.id],
+          };
+        });
+      }
+
       if (isCancelled) return;
 
       setBalance(curBal);
@@ -123,13 +129,32 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
               curPos = cleanedCloud.cleanPositions;
               curBal = cleanedCloud.newBalance;
 
+              // Rebalance portfolio margin with Straddle/Strangle hedge benefit
+              const cloudOpen = curPos.filter(p => p.status !== 'CLOSED');
+              const cloudMarginRes = calculatePortfolioMargin(cloudOpen);
+              const cloudOldMargin = cloudOpen.reduce((sum, p) => sum + p.marginUsed, 0);
+              let marginRebalanced = false;
+              if (cloudMarginRes.totalMargin !== cloudOldMargin) {
+                curBal += (cloudOldMargin - cloudMarginRes.totalMargin);
+                curPos = curPos.map(p => {
+                  if (p.status === 'CLOSED') return p;
+                  return {
+                    ...p,
+                    marginUsed: cloudMarginRes.positionMargins[p.id] !== undefined ? cloudMarginRes.positionMargins[p.id] : p.marginUsed,
+                    isHedged: cloudMarginRes.hedgedLegIds.has(p.id),
+                    hedgeBenefit: cloudMarginRes.hedgeNotes[p.id],
+                  };
+                });
+                marginRebalanced = true;
+              }
+
               setPositions(curPos);
               setBalance(curBal);
               localStorage.setItem(positionsKey, JSON.stringify(curPos));
               localStorage.setItem(balanceKey, JSON.stringify(curBal));
 
-              // If expired positions were purged or settled from cloud, sync clean state to cloud
-              if (cleanedCloud.changed) {
+              // If expired positions were purged or straddle margin was rebalanced, sync state to cloud
+              if (cleanedCloud.changed || marginRebalanced) {
                 fetch('/api/user/trades', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -259,32 +284,10 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
     return () => clearInterval(pruneInterval);
   }, [balance]);
 
-  // Calculate required margin for an order
+  // Calculate required margin for an order considering existing portfolio hedges
   const calculateMargin = useCallback((params: TradeOrderParams): number => {
-    const totalValue = params.quantity * params.price;
-
-    if (params.segment === 'EQUITY') {
-      if (params.product === 'INTRADAY') {
-        return totalValue * 0.2; // 5x leverage on Intraday equity (20% margin)
-      }
-      return totalValue; // 100% for delivery CNC
-    }
-
-    if (params.segment === 'OPTION') {
-      if (params.side === 'BUY') {
-        return totalValue; // Option buyers pay 100% premium
-      }
-      // Option writing margin (~15% of strike/spot value)
-      const strike = params.contractDetails?.strikePrice || params.price;
-      return params.quantity * strike * 0.15;
-    }
-
-    if (params.segment === 'FUTURE') {
-      return totalValue * 0.15; // 15% SPAN+Exposure margin for futures
-    }
-
-    return totalValue;
-  }, []);
+    return calculateOrderMarginRequirement(positions, params).requiredMargin;
+  }, [positions]);
 
   // Reset paper trading account
   const resetAccount = useCallback(() => {
@@ -312,10 +315,11 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
 
   // Execute an order
   const placeOrder = useCallback((params: TradeOrderParams): { success: boolean; message: string } => {
-    const requiredMargin = calculateMargin(params);
+    const marginCheck = calculateOrderMarginRequirement(positions, params);
+    const requiredMargin = marginCheck.requiredMargin;
 
-    // Require sufficient available margin for both BUY and SELL
-    if (requiredMargin > balance) {
+    // Require sufficient available margin only for new/increasing risk orders (never block exit orders!)
+    if (!marginCheck.isExit && requiredMargin > balance) {
       return {
         success: false,
         message: `Insufficient margin! Required: ₹${requiredMargin.toLocaleString('en-IN', { maximumFractionDigits: 0 })}, Available: ₹${balance.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
@@ -350,38 +354,24 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
     }
 
     setPositions(prev => {
-      // Find matching open position by symbol, segment, product, and contract details
-      const existingIdx = prev.findIndex(p => {
-        if (p.status === 'CLOSED') return false; // Only match active open positions
-        const sameSym = p.symbol === params.symbol && p.segment === params.segment && p.product === params.product;
-        if (!sameSym) return false;
-        if (params.segment === 'OPTION') {
-          return p.contractDetails?.strikePrice === params.contractDetails?.strikePrice &&
-                 p.contractDetails?.optionType === params.contractDetails?.optionType &&
-                 p.contractDetails?.expiryDate === params.contractDetails?.expiryDate;
-        }
-        return true;
-      });
+      // Find matching open position by contract details
+      const existingIdx = prev.findIndex(p => p.status !== 'CLOSED' && isSameContract(p, params));
+      let nextPositions: Position[] = [...prev];
+      let netRealizedPnL = 0;
 
       if (existingIdx >= 0) {
         const existing = prev[existingIdx];
-        const updated = [...prev];
 
         if (existing.side === params.side) {
-          // Adding to existing position: Block additional requiredMargin from available cash
-          setBalance(b => b - requiredMargin);
-
+          // Adding to existing position: increase quantity and compute weighted average price
           const totalQty = existing.quantity + params.quantity;
           const newAvgPrice = (existing.averagePrice * existing.quantity + params.price * params.quantity) / totalQty;
-          const newMargin = existing.marginUsed + requiredMargin;
 
-          updated[existingIdx] = {
+          nextPositions[existingIdx] = {
             ...existing,
             quantity: totalQty,
             averagePrice: Math.round(newAvgPrice * 100) / 100,
-            marginUsed: newMargin,
           };
-          return updated;
         } else {
           // Reducing or exiting position (opposite side order)
           if (params.quantity <= existing.quantity) {
@@ -390,15 +380,11 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
               ? (params.price - existing.averagePrice) * params.quantity
               : (existing.averagePrice - params.price) * params.quantity;
 
-            const ratio = params.quantity / existing.quantity;
-            const releasedMargin = existing.marginUsed * ratio;
-
-            // Refund blocked margin for the exited portion + realized P&L
-            setBalance(b => b + releasedMargin + realizedTradePnL);
+            netRealizedPnL += realizedTradePnL;
 
             if (diffQty === 0) {
               // Full exit: Mark as CLOSED
-              updated[existingIdx] = {
+              nextPositions[existingIdx] = {
                 ...existing,
                 quantity: 0,
                 status: 'CLOSED',
@@ -408,17 +394,15 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
                 unrealizedPnL: 0,
                 unrealizedPnLPerc: 0,
                 marginUsed: 0,
+                isHedged: false,
               };
-              return updated;
             } else {
-              // Partial exit: Keep remaining quantity and margin
-              updated[existingIdx] = {
+              // Partial exit: Keep remaining quantity
+              nextPositions[existingIdx] = {
                 ...existing,
                 quantity: diffQty,
                 realizedPnL: existing.realizedPnL + realizedTradePnL,
-                marginUsed: existing.marginUsed - releasedMargin,
               };
-              return updated;
             }
           } else {
             // Flipped to opposite side: Close existing, open excess
@@ -427,12 +411,8 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
               ? (params.price - existing.averagePrice) * existing.quantity
               : (existing.averagePrice - params.price) * existing.quantity;
 
-            const newMargin = calculateMargin({ ...params, quantity: excessQty });
+            netRealizedPnL += realizedTradePnL;
 
-            // Refund closed position margin & P&L, and block newMargin for the excess portion
-            setBalance(b => b + existing.marginUsed + realizedTradePnL - newMargin);
-
-            // Close existing position
             const closedPos: Position = {
               ...existing,
               quantity: 0,
@@ -443,6 +423,7 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
               unrealizedPnL: 0,
               unrealizedPnLPerc: 0,
               marginUsed: 0,
+              isHedged: false,
             };
 
             const newPos: Position = {
@@ -458,19 +439,17 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
               unrealizedPnL: 0,
               unrealizedPnLPerc: 0,
               realizedPnL: 0,
-              marginUsed: newMargin,
+              marginUsed: 0,
               openedAt: Date.now(),
               status: 'OPEN',
               contractDetails: params.contractDetails,
             };
 
-            return [newPos, closedPos, ...prev.filter((_, idx) => idx !== existingIdx)];
+            nextPositions = [newPos, closedPos, ...prev.filter((_, idx) => idx !== existingIdx)];
           }
         }
       } else {
-        // Brand new position: Block requiredMargin from available cash
-        setBalance(b => b - requiredMargin);
-
+        // Brand new position
         const newPos: Position = {
           id: 'POS-' + Math.random().toString(36).substring(2, 9).toUpperCase(),
           symbol: params.symbol,
@@ -484,20 +463,47 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
           unrealizedPnL: 0,
           unrealizedPnLPerc: 0,
           realizedPnL: 0,
-          marginUsed: requiredMargin,
+          marginUsed: 0,
           openedAt: Date.now(),
           status: 'OPEN',
           contractDetails: params.contractDetails,
         };
-        return [newPos, ...prev];
+        nextPositions = [newPos, ...prev];
       }
+
+      // Calculate portfolio margin before and after this order
+      const oldOpenPositions = prev.filter(p => p.status !== 'CLOSED');
+      const oldMarginRes = calculatePortfolioMargin(oldOpenPositions);
+
+      const newOpenPositions = nextPositions.filter(p => p.status !== 'CLOSED');
+      const newMarginRes = calculatePortfolioMargin(newOpenPositions);
+
+      // Margin change: positive means margin consumed, negative means margin released!
+      const marginChange = newMarginRes.totalMargin - oldMarginRes.totalMargin;
+
+      // Net change in available balance: Realized P&L minus margin consumed (or plus margin released)
+      const netCashAdjustment = netRealizedPnL - marginChange;
+      setBalance(b => b + netCashAdjustment);
+
+      // Update marginUsed and hedge benefit flags on all open positions
+      return nextPositions.map(p => {
+        if (p.status === 'CLOSED') {
+          return { ...p, marginUsed: 0, isHedged: false };
+        }
+        return {
+          ...p,
+          marginUsed: newMarginRes.positionMargins[p.id] !== undefined ? newMarginRes.positionMargins[p.id] : p.marginUsed,
+          isHedged: newMarginRes.hedgedLegIds.has(p.id),
+          hedgeBenefit: newMarginRes.hedgeNotes[p.id],
+        };
+      });
     });
 
     return {
       success: true,
       message: `${params.side} ${params.quantity} ${params.contractDetails?.optionType ? params.contractDetails.optionType : ''} of ${params.symbol} executed at ₹${params.price}`
     };
-  }, [balance, calculateMargin]);
+  }, [balance, positions]);
 
   // Update positions with live market prices (only open, non-expired positions)
   const updatePrices = useCallback((priceMap: Record<string, number>) => {
@@ -579,9 +585,9 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
       const pos = prev[posIdx];
       if (pos.status === 'CLOSED') return prev;
 
-      const exitPnL = pos.unrealizedPnL;
-      // Refund margin + PnL
-      setBalance(b => b + pos.marginUsed + exitPnL);
+      // Calculate portfolio margin before exit
+      const openPositions = prev.filter(p => p.status !== 'CLOSED');
+      const oldMarginRes = calculatePortfolioMargin(openPositions);
 
       // Record closing order
       const closeOrder: Order = {
@@ -602,7 +608,8 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
       };
       setOrders(o => [closeOrder, ...o]);
 
-      // Keep in positions array as CLOSED showing realized P&L for today
+      // Mark position as CLOSED
+      const exitPnL = pos.unrealizedPnL;
       const updated = [...prev];
       updated[posIdx] = {
         ...pos,
@@ -613,23 +620,99 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
         unrealizedPnL: 0,
         unrealizedPnLPerc: 0,
         marginUsed: 0,
+        isHedged: false,
       };
-      return updated;
+
+      // Calculate portfolio margin after exit
+      const remainingOpen = updated.filter(p => p.status !== 'CLOSED');
+      const newMarginRes = calculatePortfolioMargin(remainingOpen);
+
+      // Margin released = difference in portfolio margin requirement
+      const releasedMargin = Math.max(0, oldMarginRes.totalMargin - newMarginRes.totalMargin);
+
+      // Refund released margin + realized P&L
+      setBalance(b => b + releasedMargin + exitPnL);
+
+      // Update remaining positions with their rebalanced margins
+      return updated.map(p => {
+        if (p.status === 'CLOSED') return p;
+        return {
+          ...p,
+          marginUsed: newMarginRes.positionMargins[p.id] !== undefined ? newMarginRes.positionMargins[p.id] : p.marginUsed,
+          isHedged: newMarginRes.hedgedLegIds.has(p.id),
+          hedgeBenefit: newMarginRes.hedgeNotes[p.id],
+        };
+      });
     });
   }, []);
 
-  // Exit all open positions at market price
+  // Exit all open positions at market price atomically
   const closeAllPositions = useCallback(() => {
-    positions.filter(p => p.status !== 'CLOSED').forEach(p => closePosition(p.id));
-  }, [positions, closePosition]);
+    setPositions(prev => {
+      const openPos = prev.filter(p => p.status !== 'CLOSED');
+      if (openPos.length === 0) return prev;
+
+      let totalMarginToRelease = 0;
+      let totalPnL = 0;
+      const now = Date.now();
+      const newOrders: Order[] = [];
+
+      const updated = prev.map(p => {
+        if (p.status === 'CLOSED') return p;
+        totalMarginToRelease += p.marginUsed;
+        totalPnL += p.unrealizedPnL;
+
+        newOrders.push({
+          id: 'ORD-' + Math.random().toString(36).substring(2, 9).toUpperCase(),
+          timestamp: now,
+          symbol: p.symbol,
+          name: p.name,
+          segment: p.segment,
+          side: p.side === 'BUY' ? 'SELL' : 'BUY',
+          product: p.product,
+          type: 'MARKET',
+          quantity: p.quantity,
+          price: p.currentPrice,
+          status: 'EXECUTED',
+          filledPrice: p.currentPrice,
+          filledTimestamp: now,
+          contractDetails: p.contractDetails
+        });
+
+        return {
+          ...p,
+          status: 'CLOSED' as const,
+          closedAt: now,
+          exitPrice: p.currentPrice,
+          realizedPnL: p.unrealizedPnL,
+          unrealizedPnL: 0,
+          unrealizedPnLPerc: 0,
+          marginUsed: 0,
+          isHedged: false,
+        };
+      });
+
+      setOrders(o => [...newOrders, ...o]);
+      setBalance(b => b + totalMarginToRelease + totalPnL);
+      return updated;
+    });
+  }, []);
 
   // Directly delete an individual position and refund its margin
   const deletePosition = useCallback((positionId: string) => {
     setPositions(prev => {
       const pos = prev.find(p => p.id === positionId);
-      if (pos && pos.status !== 'CLOSED' && pos.marginUsed > 0) {
-        setBalance(b => b + pos.marginUsed);
+      if (!pos) return prev;
+
+      if (pos.status !== 'CLOSED') {
+        const openPositions = prev.filter(p => p.status !== 'CLOSED');
+        const oldMarginRes = calculatePortfolioMargin(openPositions);
+        const remainingOpen = openPositions.filter(p => p.id !== positionId);
+        const newMarginRes = calculatePortfolioMargin(remainingOpen);
+        const releasedMargin = Math.max(0, oldMarginRes.totalMargin - newMarginRes.totalMargin);
+        setBalance(b => b + releasedMargin);
       }
+
       return prev.filter(p => p.id !== positionId);
     });
   }, []);

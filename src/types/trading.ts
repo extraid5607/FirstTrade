@@ -46,6 +46,8 @@ export interface Position {
   status: PositionStatus;
   closedAt?: number;
   exitPrice?: number;
+  isHedged?: boolean;
+  hedgeBenefit?: string;
   contractDetails?: {
     strikePrice?: number;
     optionType?: 'CE' | 'PE';
@@ -62,4 +64,22 @@ export interface PortfolioSummary {
   totalUnrealizedPnL: number;
   totalRealizedPnL: number;
   netPnL: number;
+}
+
+export interface TradeOrderParams {
+  symbol: string;
+  name: string;
+  segment: TradingSegment;
+  side: OrderSide;
+  product: OrderProduct;
+  type: OrderType;
+  quantity: number;
+  price: number;
+  triggerPrice?: number;
+  contractDetails?: {
+    strikePrice?: number;
+    optionType?: 'CE' | 'PE';
+    expiryDate?: string;
+    lotSize?: number;
+  };
 }

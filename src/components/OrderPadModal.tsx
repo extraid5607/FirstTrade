@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { TradingSegment, OrderSide, OrderProduct, OrderType } from '@/types/trading';
+import React, { useState, useEffect, useMemo } from 'react';
+import { TradingSegment, OrderSide, OrderProduct, OrderType, Position } from '@/types/trading';
 import { Quote } from '@/types/market';
 import { TradeOrderParams } from '@/lib/tradeStore';
-import { X, AlertCircle, CheckCircle2, ChevronRight, Layers, ArrowUpRight, ArrowDownRight, RefreshCw } from 'lucide-react';
+import { X, AlertCircle, CheckCircle2, ChevronRight, Layers, ArrowUpRight, ArrowDownRight, RefreshCw, Zap } from 'lucide-react';
 import { formatExpiryBadge, formatExpiryFull, getDefaultExpiry } from '@/lib/constants';
+import { calculateOrderMarginRequirement } from '@/lib/marginEngine';
 
 interface OrderPadModalProps {
   isOpen: boolean;
@@ -20,6 +21,7 @@ interface OrderPadModalProps {
   initialPrice?: number;
   currentQuote?: Quote;
   availableBalance: number;
+  positions?: Position[];
   onPlaceOrder: (params: TradeOrderParams) => { success: boolean; message: string };
 }
 
@@ -36,6 +38,7 @@ export const OrderPadModal: React.FC<OrderPadModalProps> = ({
   initialPrice,
   currentQuote,
   availableBalance,
+  positions = [],
   onPlaceOrder,
 }) => {
   const [segment, setSegment] = useState<TradingSegment>(initialSegment);
@@ -157,23 +160,34 @@ export const OrderPadModal: React.FC<OrderPadModalProps> = ({
 
   const executionPrice = type === 'MARKET' ? activeLtp : limitPrice;
 
-  let requiredMargin = 0;
-  if (segment === 'EQUITY') {
-    const totalVal = quantity * executionPrice;
-    requiredMargin = product === 'INTRADAY' ? totalVal * 0.2 : totalVal;
-  } else if (segment === 'OPTION') {
-    if (side === 'BUY') {
-      requiredMargin = quantity * executionPrice;
-    } else {
-      const spotVal = (strikePrice || currentQuote?.ltp || 22700);
-      requiredMargin = quantity * spotVal * 0.15;
-    }
-  } else if (segment === 'FUTURE') {
-    requiredMargin = quantity * executionPrice * 0.15;
-  }
+  const currentOrderParams: TradeOrderParams = useMemo(() => ({
+    symbol: initialSymbol,
+    name: currentQuote?.name || initialSymbol,
+    segment,
+    side,
+    product,
+    type,
+    quantity,
+    price: Math.round(executionPrice * 100) / 100,
+    triggerPrice: type === 'SL' ? triggerPrice : undefined,
+    contractDetails: segment === 'OPTION' ? {
+      strikePrice: strikePrice || 0,
+      optionType,
+      expiryDate: expiryDate || availableExpiries[0] || getDefaultExpiry(initialSymbol),
+      lotSize,
+    } : segment === 'FUTURE' ? {
+      lotSize,
+    } : undefined,
+  }), [initialSymbol, currentQuote, segment, side, product, type, quantity, executionPrice, triggerPrice, strikePrice, optionType, expiryDate, availableExpiries, lotSize]);
 
-  requiredMargin = Math.round(requiredMargin * 100) / 100;
-  const isMarginSufficient = availableBalance >= requiredMargin;
+  const marginCheck = useMemo(() => {
+    return calculateOrderMarginRequirement(positions, currentOrderParams);
+  }, [positions, currentOrderParams]);
+
+  const requiredMargin = marginCheck.requiredMargin;
+  const isExitOrder = marginCheck.isExit;
+  const isHedged = marginCheck.isHedged;
+  const isMarginSufficient = isExitOrder || availableBalance >= requiredMargin;
 
   const handleLotsChange = (newLots: number) => {
     const validLots = Math.max(1, newLots);
@@ -531,11 +545,25 @@ export const OrderPadModal: React.FC<OrderPadModalProps> = ({
           )}
 
           {/* Margin & Account Overview Bar */}
-          <div className="bg-slate-100/70 dark:bg-[#151926] p-3 rounded-xl border border-slate-200 dark:border-[#202739] space-y-1.5">
+          <div className="bg-slate-100/70 dark:bg-[#151926] p-3 rounded-xl border border-slate-200 dark:border-[#202739] space-y-2">
             <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
-              <span>Required Margin:</span>
+              <span className="flex items-center gap-1.5 flex-wrap">
+                <span>Required Margin:</span>
+                {isHedged && (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30">
+                    <Zap className="w-3 h-3 text-purple-500 fill-purple-500" />
+                    <span>Straddle Benefit (-75%)</span>
+                  </span>
+                )}
+              </span>
               <span className="font-mono font-bold text-slate-900 dark:text-white tabular-nums text-xs">
-                ₹{requiredMargin.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                {isExitOrder ? (
+                  <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                    ₹0 (Releases Margin)
+                  </span>
+                ) : (
+                  `₹${requiredMargin.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
+                )}
               </span>
             </div>
             <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
@@ -544,6 +572,12 @@ export const OrderPadModal: React.FC<OrderPadModalProps> = ({
                 ₹{availableBalance.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
               </span>
             </div>
+            {isExitOrder && marginCheck.releasedMarginEstimate !== undefined && marginCheck.releasedMarginEstimate > 0 && (
+              <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center justify-between border-t border-slate-200/50 dark:border-[#202739]/50 pt-1.5">
+                <span>Est. Margin Released to Balance:</span>
+                <span className="font-mono font-bold">+₹{marginCheck.releasedMarginEstimate.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+              </div>
+            )}
           </div>
 
           {/* Toast / Notification */}
@@ -563,12 +597,16 @@ export const OrderPadModal: React.FC<OrderPadModalProps> = ({
             className={`w-full py-3 rounded-xl font-bold text-xs tracking-wide transition-all shadow-lg ${
               !isMarginSufficient
                 ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed'
+                : isExitOrder
+                ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-500/20'
                 : side === 'BUY'
                 ? 'bg-[#00D09C] hover:bg-[#00B887] text-black shadow-emerald-500/20'
                 : 'bg-[#EB5B3C] hover:bg-[#D84A2C] text-white shadow-rose-500/20'
             }`}
           >
-            {side} {quantity} Qty {segment === 'OPTION' ? `${strikePrice} ${optionType}` : initialSymbol} @ ₹{executionPrice.toFixed(2)}
+            {isExitOrder
+              ? `Square Off Position (${quantity} Qty @ ₹${executionPrice.toFixed(2)})`
+              : `${side} ${quantity} Qty ${segment === 'OPTION' ? `${strikePrice} ${optionType}` : initialSymbol} @ ₹${executionPrice.toFixed(2)}`}
           </button>
         </div>
       </div>

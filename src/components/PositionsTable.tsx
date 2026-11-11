@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { Position } from '@/types/trading';
-import { LogOut, ArrowUpRight, ArrowDownRight, ShieldAlert, CheckCircle2, Check, Clock, Trash2 } from 'lucide-react';
+import { LogOut, ArrowUpRight, ArrowDownRight, ShieldAlert, CheckCircle2, Check, Clock, Trash2, Zap } from 'lucide-react';
 import { formatExpiryBadge, formatExpiryFull } from '@/lib/constants';
 import { isOptionExpired } from '@/lib/expiry';
 
@@ -30,6 +30,7 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({
   const totalUnrealizedPnL = openPositions.reduce((acc, p) => acc + p.unrealizedPnL, 0);
   const totalRealizedPnL = closedPositions.reduce((acc, p) => acc + (p.realizedPnL || 0), 0);
   const totalTodayPnL = totalUnrealizedPnL + totalRealizedPnL;
+  const totalUsedMargin = openPositions.reduce((acc, p) => acc + (p.marginUsed || 0), 0);
 
   const filteredPositions = positions.filter(p => {
     if (filter === 'OPEN') return p.status !== 'CLOSED';
@@ -90,7 +91,7 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({
             </button>
           </div>
 
-          {/* Realized vs Unrealized breakdown pill */}
+          {/* Realized vs Unrealized & Margin breakdown pill */}
           <div className="hidden sm:flex items-center gap-3 pl-2 border-l border-slate-300 dark:border-[#1F2636] text-[11px]">
             <div>
               <span className="text-slate-500 dark:text-slate-400">Booked: </span>
@@ -102,6 +103,12 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({
               <span className="text-slate-500 dark:text-slate-400">MTM: </span>
               <strong className={`font-mono tabular-nums ${totalUnrealizedPnL >= 0 ? 'text-[#00D09C]' : 'text-[#EB5B3C]'}`}>
                 {totalUnrealizedPnL >= 0 ? '+' : ''}₹{totalUnrealizedPnL.toFixed(2)}
+              </strong>
+            </div>
+            <div>
+              <span className="text-slate-500 dark:text-slate-400">Blocked Margin: </span>
+              <strong className="font-mono tabular-nums text-slate-800 dark:text-slate-200">
+                ₹{totalUsedMargin.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
               </strong>
             </div>
           </div>
@@ -226,6 +233,19 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({
                       ₹{(isClosed ? (pos.exitPrice || pos.currentPrice) : pos.currentPrice).toFixed(2)}
                     </span>
                   </div>
+                  <div>
+                    <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase block">Margin</span>
+                    <div className="flex items-center gap-1">
+                      <span className="font-semibold text-slate-800 dark:text-slate-200 tabular-nums">
+                        {isClosed ? '₹0' : `₹${pos.marginUsed.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
+                      </span>
+                      {pos.isHedged && !isClosed && (
+                        <span className="px-1 py-0.2 rounded text-[8px] font-bold bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30">
+                          -75%
+                        </span>
+                      )}
+                    </div>
+                  </div>
                   {expFull && (
                     <div className="hidden sm:block">
                       <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase block">Exp</span>
@@ -269,6 +289,7 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({
               <th className="py-2 px-3 text-right">Qty</th>
               <th className="py-2 px-3 text-right">Avg Entry (₹)</th>
               <th className="py-2 px-3 text-right">LTP / Exit (₹)</th>
+              <th className="py-2 px-3 text-right">Blocked Margin (₹)</th>
               <th className="py-2 px-3 text-right">Today's P&L (₹)</th>
               <th className="py-2 px-3 text-center">Action</th>
             </tr>
@@ -376,6 +397,27 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({
                       </span>
                     ) : (
                       `₹${pos.currentPrice.toFixed(2)}`
+                    )}
+                  </td>
+
+                  {/* Blocked Margin */}
+                  <td className="py-2.5 px-3 text-right">
+                    {isClosed ? (
+                      <span className="text-slate-400 font-mono text-[11px]">₹0</span>
+                    ) : (
+                      <div>
+                        <span className="font-mono font-bold tabular-nums text-slate-900 dark:text-white text-xs">
+                          ₹{pos.marginUsed.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                        </span>
+                        {pos.isHedged && (
+                          <div className="flex items-center justify-end gap-0.5 mt-0.5">
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-bold bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30">
+                              <Zap className="w-2.5 h-2.5 text-purple-500 fill-purple-500" />
+                              <span>{pos.hedgeBenefit || '-75% Hedged'}</span>
+                            </span>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </td>
 

@@ -137,11 +137,18 @@ export const AccountTab: React.FC<AccountTabProps> = ({
             </div>
 
             {/* Live Margin & P&L Cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-6 pt-5 border-t border-slate-100 dark:border-[#1A202E]">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-5 border-t border-slate-100 dark:border-[#1A202E]">
               <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-[#161C28] border border-slate-200/80 dark:border-[#222A3A]">
                 <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Available Margin</span>
                 <span className="text-sm sm:text-base font-mono font-bold text-slate-900 dark:text-white tabular-nums">
                   ₹{portfolio.availableCash.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                </span>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-[#161C28] border border-slate-200/80 dark:border-[#222A3A]">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Blocked Margin</span>
+                <span className="text-sm sm:text-base font-mono font-bold text-amber-600 dark:text-amber-400 tabular-nums">
+                  ₹{portfolio.usedMargin.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                 </span>
               </div>
 
@@ -154,7 +161,7 @@ export const AccountTab: React.FC<AccountTabProps> = ({
                 </span>
               </div>
 
-              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-[#161C28] border border-slate-200/80 dark:border-[#222A3A] col-span-2 sm:col-span-1">
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-[#161C28] border border-slate-200/80 dark:border-[#222A3A]">
                 <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Account Net Value</span>
                 <span className="text-sm sm:text-base font-mono font-bold text-slate-900 dark:text-white tabular-nums">
                   ₹{portfolio.totalAccountValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
