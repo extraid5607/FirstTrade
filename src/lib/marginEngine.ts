@@ -73,8 +73,9 @@ export interface PortfolioMarginResult {
  * - When holding a long option that hedges a short option (Debit/Credit Spreads):
  *   Short option margin is discounted by 60% due to capped risk.
  */
-export function calculatePortfolioMargin(positions: Position[]): PortfolioMarginResult {
-  const openPositions = positions.filter(p => p.status !== 'CLOSED' && p.quantity > 0);
+export function calculatePortfolioMargin(positions: Position[] = []): PortfolioMarginResult {
+  const safePositions = Array.isArray(positions) ? positions : [];
+  const openPositions = safePositions.filter(p => p && p.status !== 'CLOSED' && p.quantity > 0);
   const positionMargins: Record<string, number> = {};
   const hedgedLegIds = new Set<string>();
   const hedgeNotes: Record<string, string> = {};
@@ -242,10 +243,11 @@ export interface OrderMarginCheckResult {
  * - If order forms a Straddle or Strangle: requiredMargin receives ~75% hedge discount
  */
 export function calculateOrderMarginRequirement(
-  existingPositions: Position[],
+  existingPositions: Position[] = [],
   orderParams: TradeOrderParams
 ): OrderMarginCheckResult {
-  const openPositions = existingPositions.filter(p => p.status !== 'CLOSED' && p.quantity > 0);
+  const safePositions = Array.isArray(existingPositions) ? existingPositions : [];
+  const openPositions = safePositions.filter(p => p && p.status !== 'CLOSED' && p.quantity > 0);
 
   // 1. Check if this is an exit / square-off order for an existing opposite-side position
   const existingIdx = openPositions.findIndex(p => isSameContract(p, orderParams));

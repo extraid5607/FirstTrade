@@ -147,8 +147,6 @@ export const OrderPadModal: React.FC<OrderPadModalProps> = ({
     fetchOptionStrikeLtp(initialSymbol, strikePrice, optionType, newExp);
   };
 
-  if (!isOpen) return null;
-
   let activeLtp = 0;
   if (segment === 'OPTION') {
     activeLtp = optionPremium || 10;
@@ -239,6 +237,8 @@ export const OrderPadModal: React.FC<OrderPadModalProps> = ({
     atmApprox + step * 2,
     atmApprox + step * 3,
   ];
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 dark:bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
