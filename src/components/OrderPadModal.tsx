@@ -5,7 +5,7 @@ import { TradingSegment, OrderSide, OrderProduct, OrderType, Position } from '@/
 import { Quote } from '@/types/market';
 import { TradeOrderParams } from '@/lib/tradeStore';
 import { X, AlertCircle, CheckCircle2, ChevronRight, Layers, ArrowUpRight, ArrowDownRight, RefreshCw, Zap } from 'lucide-react';
-import { formatExpiryBadge, formatExpiryFull, getDefaultExpiry } from '@/lib/constants';
+import { formatExpiryBadge, formatExpiryFull, getDefaultExpiry, WATCHLIST_INSTRUMENTS } from '@/lib/constants';
 import { calculateOrderMarginRequirement } from '@/lib/marginEngine';
 
 interface OrderPadModalProps {
@@ -73,7 +73,8 @@ export const OrderPadModal: React.FC<OrderPadModalProps> = ({
     setLots(1);
     setQuantity(lSize);
 
-    const step = (initialSymbol === 'BANKNIFTY' || initialSymbol === 'SENSEX') ? 100 : initialSymbol === 'NIFTY' ? 50 : 20;
+    const instConfig = WATCHLIST_INSTRUMENTS.find(i => i.symbol === initialSymbol);
+    const step = instConfig?.strikeStep || ((initialSymbol === 'BANKNIFTY' || initialSymbol === 'SENSEX') ? 100 : initialSymbol === 'NIFTY' ? 50 : 20);
 
     if (initialStrike) {
       setStrikePrice(initialStrike);
@@ -226,7 +227,8 @@ export const OrderPadModal: React.FC<OrderPadModalProps> = ({
   };
 
   const spotVal = currentQuote?.ltp || 22700;
-  const step = initialSymbol === 'BANKNIFTY' ? 100 : initialSymbol === 'NIFTY' ? 50 : 20;
+  const instConfig = WATCHLIST_INSTRUMENTS.find(i => i.symbol === initialSymbol);
+  const step = instConfig?.strikeStep || (initialSymbol === 'BANKNIFTY' ? 100 : initialSymbol === 'NIFTY' ? 50 : 20);
   const atmApprox = Math.round(spotVal / step) * step;
   const strikeOptions = [
     atmApprox - step * 3,

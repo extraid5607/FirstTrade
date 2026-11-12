@@ -172,7 +172,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(cached.data);
     }
 
-    const isIndex = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'].includes(sym);
+    const isIndex = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX'].includes(sym);
     const quote = isIndex ? await fetchIndexQuote(sym) : await fetchStockQuote(sym);
 
     if (quote) {
