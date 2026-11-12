@@ -29,12 +29,16 @@ export async function GET(req: NextRequest) {
     if (!data) {
       return NextResponse.json({
         balance: INITIAL_DEMO_CAPITAL,
+        baseCapital: INITIAL_DEMO_CAPITAL,
         positions: [],
         orders: [],
       });
     }
 
-    return NextResponse.json(data);
+    return NextResponse.json({
+      ...data,
+      baseCapital: data.baseCapital !== undefined ? data.baseCapital : INITIAL_DEMO_CAPITAL,
+    });
   } catch (error) {
     console.error('API /api/user/trades GET error', error);
     return NextResponse.json({ error: 'Failed to load trade data' }, { status: 500 });
@@ -45,7 +49,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { userId, username, email, balance, positions, orders } = body;
+    const { userId, username, email, balance, baseCapital, positions, orders } = body;
     const targetId = userId || email || username;
 
     if (!targetId) {
@@ -55,6 +59,7 @@ export async function POST(req: NextRequest) {
     const key = getUserDataKey(targetId);
     await redis.set(key, {
       balance,
+      baseCapital: baseCapital !== undefined ? baseCapital : INITIAL_DEMO_CAPITAL,
       positions,
       orders,
       updatedAt: Date.now(),

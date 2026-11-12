@@ -39,17 +39,24 @@ export function calculateStandaloneMargin(item: {
     return Math.round(totalValue * 100) / 100; // 100% for delivery CNC
   }
 
+  const isIndex = ['NIFTY', 'BANKNIFTY', 'SENSEX', 'FINNIFTY', 'MIDCPNIFTY'].includes(item.symbol.toUpperCase());
+
   if (item.segment === 'FUTURE') {
-    return Math.round(totalValue * 0.15 * 100) / 100; // 15% SPAN+Exposure
+    // Real SEBI SPAN + Exposure for Futures: ~9% for Index, ~14% for Stocks
+    const rate = isIndex ? 0.09 : 0.14;
+    return Math.round(totalValue * rate * 100) / 100;
   }
 
   if (item.segment === 'OPTION') {
     if (item.side === 'BUY') {
       return Math.round(totalValue * 100) / 100; // 100% premium paid upfront
     }
-    // Option selling margin (standard Indian broker / NSE SPAN: ~12-15% of strike/spot)
+    // Option selling margin (Real Indian Broker / SEBI SPAN + Exposure):
+    // Index Options (NIFTY, SENSEX, BANKNIFTY): ~9% of strike value (~₹1.3L - ₹1.5L per lot)
+    // Stock Options (RELIANCE, ICICIBANK, TCS): ~14% of strike value
+    const rate = isIndex ? 0.09 : 0.14;
     const strike = item.contractDetails?.strikePrice || item.price;
-    return Math.round(item.quantity * strike * 0.15 * 100) / 100;
+    return Math.round(item.quantity * strike * rate * 100) / 100;
   }
 
   return Math.round(totalValue * 100) / 100;
