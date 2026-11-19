@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { WATCHLIST_INSTRUMENTS } from '@/lib/constants';
+import { WATCHLIST_INSTRUMENTS, getDefaultExpiry } from '@/lib/constants';
+import { isExpiredOnPastDay } from '@/lib/expiry';
 import { calculateGreeks } from '@/lib/greeks';
 import { OptionChainData, OptionStrikeRow } from '@/types/market';
 
@@ -55,8 +56,13 @@ export async function GET(req: NextRequest) {
             const nextData = JSON.parse(match[1]);
             const oc = nextData.props?.pageProps?.data?.optionChain;
             if (oc && Array.isArray(oc.optionContracts) && oc.optionContracts.length > 0) {
-              expiryDates = oc.aggregatedDetails?.expiryDates || [];
-              selectedExpiry = oc.aggregatedDetails?.currentExpiry || expiry;
+              const rawExpiries: string[] = oc.aggregatedDetails?.expiryDates || [];
+              expiryDates = rawExpiries.filter(e => !isExpiredOnPastDay(e));
+              if (expiryDates.length === 0) {
+                expiryDates = [getDefaultExpiry(symbol)];
+              }
+              const candidateExpiry = oc.aggregatedDetails?.currentExpiry || expiry;
+              selectedExpiry = (candidateExpiry && !isExpiredOnPastDay(candidateExpiry)) ? candidateExpiry : expiryDates[0];
               lotSize = oc.aggregatedDetails?.lotSize || lotSize;
 
               rawList = oc.optionContracts.map((c: any) => ({
@@ -125,8 +131,14 @@ export async function GET(req: NextRequest) {
         throw new Error('Invalid option chain response');
       }
 
-      expiryDates = rawChain.expiryDetailsDto?.expiryDates || [];
-      selectedExpiry = expiry || rawChain.expiryDetailsDto?.currentExpiry || expiryDates[0] || '';
+      const rawExpiries: string[] = rawChain.expiryDetailsDto?.expiryDates || [];
+      expiryDates = rawExpiries.filter(e => !isExpiredOnPastDay(e));
+      if (expiryDates.length === 0) {
+        expiryDates = [getDefaultExpiry(symbol)];
+      }
+
+      const candidateExpiry = expiry || rawChain.expiryDetailsDto?.currentExpiry || expiryDates[0];
+      selectedExpiry = (candidateExpiry && !isExpiredOnPastDay(candidateExpiry)) ? candidateExpiry : expiryDates[0];
       lotSize = rawChain.expiryDetailsDto?.expiryLotSize || config?.lotSize || lotSize;
       rawList = rawChain.optionChains;
     }

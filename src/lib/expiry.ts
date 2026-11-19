@@ -1,4 +1,5 @@
 import { Position } from '@/types/trading';
+import { getDefaultExpiry } from '@/lib/constants';
 
 /**
  * Returns UTC timestamp for 15:30:00 IST (10:00:00 UTC) on the expiry date.
@@ -141,7 +142,18 @@ export function cleanAndSettlePositions(
       continue;
     }
 
-    // 2. Open positions: check if expired on a past day
+    // 2. Open positions: check if opened TODAY
+    // Positions opened TODAY must NEVER be deleted! If the expiry is in the past, auto-roll to current active expiry
+    if (isTodayDate(pos.openedAt)) {
+      if (isOption && pos.contractDetails && isExpiredOnPastDay(expiry, now)) {
+        pos.contractDetails.expiryDate = getDefaultExpiry(pos.symbol);
+        changed = true;
+      }
+      cleanPositions.push(pos);
+      continue;
+    }
+
+    // 3. Open positions from PREVIOUS days: check if expired on a past day or past intraday
     const isPastExp = isOption && isExpiredOnPastDay(expiry, now);
     const isPastIntraday = pos.product === 'INTRADAY' && !isTodayDate(pos.openedAt);
 
@@ -154,7 +166,7 @@ export function cleanAndSettlePositions(
       continue;
     }
 
-    // 3. Open positions: check if expired TODAY after 15:30 IST
+    // 4. Open positions: check if expired TODAY after 15:30 IST
     const isExpToday = isOption && isExpiredToday(expiry, now);
     if (isExpToday) {
       changed = true;

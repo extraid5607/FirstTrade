@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Order, Position, PortfolioSummary, OrderSide, OrderProduct, OrderType, TradingSegment, TradeOrderParams } from '@/types/trading';
 import { INITIAL_DEMO_CAPITAL, getDefaultExpiry } from '@/lib/constants';
-import { cleanAndSettlePositions, isOptionExpired } from '@/lib/expiry';
+import { cleanAndSettlePositions, isOptionExpired, isExpiredOnPastDay } from '@/lib/expiry';
 import {
   calculatePortfolioMargin,
   calculateOrderMarginRequirement,
@@ -361,7 +361,19 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
   // Execute an order
   // -------------------------------------------------------------
   const placeOrder = useCallback((params: TradeOrderParams): { success: boolean; message: string } => {
-    const marginCheck = calculateOrderMarginRequirement(positions, params);
+    // Ensure option contracts placed today ALWAYS carry a valid upcoming expiry date
+    const effectiveParams: TradeOrderParams = { ...params };
+    if (effectiveParams.segment === 'OPTION' && effectiveParams.contractDetails) {
+      const exp = effectiveParams.contractDetails.expiryDate;
+      if (!exp || exp === 'CURRENT' || isExpiredOnPastDay(exp)) {
+        effectiveParams.contractDetails = {
+          ...effectiveParams.contractDetails,
+          expiryDate: getDefaultExpiry(effectiveParams.symbol),
+        };
+      }
+    }
+
+    const marginCheck = calculateOrderMarginRequirement(positions, effectiveParams);
     const requiredMargin = marginCheck.requiredMargin;
 
     // Require sufficient available margin only for new/increasing risk orders (never block exit orders!)
@@ -373,44 +385,44 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
     }
 
     const orderId = 'ORD-' + Math.random().toString(36).substring(2, 9).toUpperCase();
-    const isMarket = params.type === 'MARKET';
+    const isMarket = effectiveParams.type === 'MARKET';
 
     const newOrder: Order = {
       id: orderId,
       timestamp: Date.now(),
-      symbol: params.symbol,
-      name: params.name,
-      segment: params.segment,
-      side: params.side,
-      product: params.product,
-      type: params.type,
-      quantity: params.quantity,
-      price: params.price,
-      triggerPrice: params.triggerPrice,
+      symbol: effectiveParams.symbol,
+      name: effectiveParams.name,
+      segment: effectiveParams.segment,
+      side: effectiveParams.side,
+      product: effectiveParams.product,
+      type: effectiveParams.type,
+      quantity: effectiveParams.quantity,
+      price: effectiveParams.price,
+      triggerPrice: effectiveParams.triggerPrice,
       status: isMarket ? 'EXECUTED' : 'PENDING',
-      filledPrice: isMarket ? params.price : undefined,
+      filledPrice: isMarket ? effectiveParams.price : undefined,
       filledTimestamp: isMarket ? Date.now() : undefined,
-      contractDetails: params.contractDetails,
+      contractDetails: effectiveParams.contractDetails,
     };
 
     setOrders(prev => [newOrder, ...prev]);
 
     if (!isMarket) {
-      return { success: true, message: `Limit Order placed successfully for ${params.symbol} at ₹${params.price}` };
+      return { success: true, message: `Limit Order placed successfully for ${effectiveParams.symbol} at ₹${effectiveParams.price}` };
     }
 
     setPositions(prev => {
       // Find matching open position by contract details
-      const existingIdx = prev.findIndex(p => p.status !== 'CLOSED' && isSameContract(p, params));
+      const existingIdx = prev.findIndex(p => p.status !== 'CLOSED' && isSameContract(p, effectiveParams));
       let nextPositions: Position[] = [...prev];
 
       if (existingIdx >= 0) {
         const existing = prev[existingIdx];
 
-        if (existing.side === params.side) {
+        if (existing.side === effectiveParams.side) {
           // Adding to existing position: increase quantity and compute weighted average price
-          const totalQty = existing.quantity + params.quantity;
-          const newAvgPrice = (existing.averagePrice * existing.quantity + params.price * params.quantity) / totalQty;
+          const totalQty = existing.quantity + effectiveParams.quantity;
+          const newAvgPrice = (existing.averagePrice * existing.quantity + effectiveParams.price * effectiveParams.quantity) / totalQty;
 
           nextPositions[existingIdx] = {
             ...existing,
@@ -419,11 +431,11 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
           };
         } else {
           // Reducing or exiting position (opposite side order)
-          if (params.quantity <= existing.quantity) {
-            const diffQty = existing.quantity - params.quantity;
+          if (effectiveParams.quantity <= existing.quantity) {
+            const diffQty = existing.quantity - effectiveParams.quantity;
             const realizedTradePnL = existing.side === 'BUY'
-              ? (params.price - existing.averagePrice) * params.quantity
-              : (existing.averagePrice - params.price) * params.quantity;
+              ? (effectiveParams.price - existing.averagePrice) * effectiveParams.quantity
+              : (existing.averagePrice - effectiveParams.price) * effectiveParams.quantity;
 
             if (diffQty === 0) {
               // Full exit: Mark as CLOSED
@@ -432,7 +444,7 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
                 quantity: 0,
                 status: 'CLOSED',
                 closedAt: Date.now(),
-                exitPrice: params.price,
+                exitPrice: effectiveParams.price,
                 realizedPnL: existing.realizedPnL + realizedTradePnL,
                 unrealizedPnL: 0,
                 unrealizedPnLPerc: 0,
@@ -449,17 +461,17 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
             }
           } else {
             // Flipped to opposite side: Close existing, open excess
-            const excessQty = params.quantity - existing.quantity;
+            const excessQty = effectiveParams.quantity - existing.quantity;
             const realizedTradePnL = existing.side === 'BUY'
-              ? (params.price - existing.averagePrice) * existing.quantity
-              : (existing.averagePrice - params.price) * existing.quantity;
+              ? (effectiveParams.price - existing.averagePrice) * existing.quantity
+              : (existing.averagePrice - effectiveParams.price) * existing.quantity;
 
             const closedPos: Position = {
               ...existing,
               quantity: 0,
               status: 'CLOSED',
               closedAt: Date.now(),
-              exitPrice: params.price,
+              exitPrice: effectiveParams.price,
               realizedPnL: existing.realizedPnL + realizedTradePnL,
               unrealizedPnL: 0,
               unrealizedPnLPerc: 0,
@@ -469,21 +481,21 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
 
             const newPos: Position = {
               id: 'POS-' + Math.random().toString(36).substring(2, 9).toUpperCase(),
-              symbol: params.symbol,
-              name: params.name,
-              segment: params.segment,
-              side: params.side,
-              product: params.product,
+              symbol: effectiveParams.symbol,
+              name: effectiveParams.name,
+              segment: effectiveParams.segment,
+              side: effectiveParams.side,
+              product: effectiveParams.product,
               quantity: excessQty,
-              averagePrice: params.price,
-              currentPrice: params.price,
+              averagePrice: effectiveParams.price,
+              currentPrice: effectiveParams.price,
               unrealizedPnL: 0,
               unrealizedPnLPerc: 0,
               realizedPnL: 0,
               marginUsed: 0,
               openedAt: Date.now(),
               status: 'OPEN',
-              contractDetails: params.contractDetails,
+              contractDetails: effectiveParams.contractDetails,
             };
 
             nextPositions = [newPos, closedPos, ...prev.filter((_, idx) => idx !== existingIdx)];
@@ -493,21 +505,21 @@ export function useTradeStore(userId?: string, isAuthReady: boolean = true) {
         // Brand new position
         const newPos: Position = {
           id: 'POS-' + Math.random().toString(36).substring(2, 9).toUpperCase(),
-          symbol: params.symbol,
-          name: params.name,
-          segment: params.segment,
-          side: params.side,
-          product: params.product,
-          quantity: params.quantity,
-          averagePrice: params.price,
-          currentPrice: params.price,
+          symbol: effectiveParams.symbol,
+          name: effectiveParams.name,
+          segment: effectiveParams.segment,
+          side: effectiveParams.side,
+          product: effectiveParams.product,
+          quantity: effectiveParams.quantity,
+          averagePrice: effectiveParams.price,
+          currentPrice: effectiveParams.price,
           unrealizedPnL: 0,
           unrealizedPnLPerc: 0,
           realizedPnL: 0,
           marginUsed: 0,
           openedAt: Date.now(),
           status: 'OPEN',
-          contractDetails: params.contractDetails,
+          contractDetails: effectiveParams.contractDetails,
         };
         nextPositions = [newPos, ...prev];
       }

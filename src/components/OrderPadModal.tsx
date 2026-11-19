@@ -6,6 +6,7 @@ import { Quote } from '@/types/market';
 import { TradeOrderParams } from '@/lib/tradeStore';
 import { X, AlertCircle, CheckCircle2, ChevronRight, Layers, ArrowUpRight, ArrowDownRight, RefreshCw, Zap } from 'lucide-react';
 import { formatExpiryBadge, formatExpiryFull, getDefaultExpiry, WATCHLIST_INSTRUMENTS } from '@/lib/constants';
+import { isExpiredOnPastDay } from '@/lib/expiry';
 import { calculateOrderMarginRequirement } from '@/lib/marginEngine';
 
 interface OrderPadModalProps {
@@ -83,7 +84,8 @@ export const OrderPadModal: React.FC<OrderPadModalProps> = ({
     }
 
     if (initialOptionType) setOptionType(initialOptionType);
-    if (initialExpiry) setExpiryDate(initialExpiry);
+    const validInitExp = (initialExpiry && !isExpiredOnPastDay(initialExpiry)) ? initialExpiry : '';
+    setExpiryDate(validInitExp);
 
     if (initialSegment === 'OPTION') {
       if (initialPrice && initialPrice > 0) {
@@ -93,7 +95,7 @@ export const OrderPadModal: React.FC<OrderPadModalProps> = ({
         const fallbackStrike = currentQuote?.ltp 
           ? Math.round(currentQuote.ltp / step) * step 
           : (initialSymbol === 'SENSEX' ? 73000 : 22700);
-        fetchOptionStrikeLtp(initialSymbol, initialStrike || fallbackStrike, initialOptionType || 'CE', initialExpiry);
+        fetchOptionStrikeLtp(initialSymbol, initialStrike || fallbackStrike, initialOptionType || 'CE', validInitExp);
       }
     } else {
       const stockPrice = currentQuote?.ltp || 100;
@@ -106,16 +108,19 @@ export const OrderPadModal: React.FC<OrderPadModalProps> = ({
     if (!strike || strike <= 0) return;
     setIsLoadingOptionLtp(true);
     try {
-      const activeExp = exp || expiryDate;
+      const activeExp = (exp && !isExpiredOnPastDay(exp)) ? exp : (expiryDate && !isExpiredOnPastDay(expiryDate)) ? expiryDate : '';
       const url = `/api/market/option-chain?symbol=${encodeURIComponent(sym)}${activeExp ? '&expiry=' + encodeURIComponent(activeExp) : ''}`;
       const res = await fetch(url);
       if (res.ok) {
         const chain = await res.json();
         if (chain.expiryDates && chain.expiryDates.length > 0) {
-          setAvailableExpiries(chain.expiryDates);
+          const validExps = chain.expiryDates.filter((d: string) => !isExpiredOnPastDay(d));
+          setAvailableExpiries(validExps.length > 0 ? validExps : [getDefaultExpiry(sym)]);
         }
-        if (!exp && !expiryDate && chain.selectedExpiry) {
+        if (!activeExp && chain.selectedExpiry && !isExpiredOnPastDay(chain.selectedExpiry)) {
           setExpiryDate(chain.selectedExpiry);
+        } else if (!activeExp && !expiryDate) {
+          setExpiryDate(getDefaultExpiry(sym));
         }
         const found = chain.strikes?.find((s: any) => Math.round(s.strikePrice) === Math.round(strike));
         if (found) {
@@ -159,25 +164,31 @@ export const OrderPadModal: React.FC<OrderPadModalProps> = ({
 
   const executionPrice = type === 'MARKET' ? activeLtp : limitPrice;
 
-  const currentOrderParams: TradeOrderParams = useMemo(() => ({
-    symbol: initialSymbol,
-    name: currentQuote?.name || initialSymbol,
-    segment,
-    side,
-    product,
-    type,
-    quantity,
-    price: Math.round(executionPrice * 100) / 100,
-    triggerPrice: type === 'SL' ? triggerPrice : undefined,
-    contractDetails: segment === 'OPTION' ? {
-      strikePrice: strikePrice || 0,
-      optionType,
-      expiryDate: expiryDate || availableExpiries[0] || getDefaultExpiry(initialSymbol),
-      lotSize,
-    } : segment === 'FUTURE' ? {
-      lotSize,
-    } : undefined,
-  }), [initialSymbol, currentQuote, segment, side, product, type, quantity, executionPrice, triggerPrice, strikePrice, optionType, expiryDate, availableExpiries, lotSize]);
+  const currentOrderParams: TradeOrderParams = useMemo(() => {
+    const resolvedExpiry = (expiryDate && !isExpiredOnPastDay(expiryDate)) 
+      ? expiryDate 
+      : (availableExpiries.find(e => !isExpiredOnPastDay(e)) || getDefaultExpiry(initialSymbol));
+
+    return {
+      symbol: initialSymbol,
+      name: currentQuote?.name || initialSymbol,
+      segment,
+      side,
+      product,
+      type,
+      quantity,
+      price: Math.round(executionPrice * 100) / 100,
+      triggerPrice: type === 'SL' ? triggerPrice : undefined,
+      contractDetails: segment === 'OPTION' ? {
+        strikePrice: strikePrice || 0,
+        optionType,
+        expiryDate: resolvedExpiry,
+        lotSize,
+      } : segment === 'FUTURE' ? {
+        lotSize,
+      } : undefined,
+    };
+  }, [initialSymbol, currentQuote, segment, side, product, type, quantity, executionPrice, triggerPrice, strikePrice, optionType, expiryDate, availableExpiries, lotSize]);
 
   const marginCheck = useMemo(() => {
     return calculateOrderMarginRequirement(positions, currentOrderParams);
@@ -195,6 +206,10 @@ export const OrderPadModal: React.FC<OrderPadModalProps> = ({
   };
 
   const handleSubmit = () => {
+    const resolvedExpiry = (expiryDate && !isExpiredOnPastDay(expiryDate)) 
+      ? expiryDate 
+      : (availableExpiries.find(e => !isExpiredOnPastDay(e)) || getDefaultExpiry(initialSymbol));
+
     const params: TradeOrderParams = {
       symbol: initialSymbol,
       name: currentQuote?.name || initialSymbol,
@@ -208,7 +223,7 @@ export const OrderPadModal: React.FC<OrderPadModalProps> = ({
       contractDetails: segment === 'OPTION' ? {
         strikePrice: strikePrice || 0,
         optionType,
-        expiryDate: expiryDate || availableExpiries[0] || getDefaultExpiry(initialSymbol),
+        expiryDate: resolvedExpiry,
         lotSize,
       } : segment === 'FUTURE' ? {
         lotSize,

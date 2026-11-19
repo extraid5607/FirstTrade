@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { OptionChainData, OptionStrikeRow, OptionContract } from '@/types/market';
+import { isExpiredOnPastDay } from '@/lib/expiry';
 import { 
   Calendar, 
   Layers, 
@@ -191,7 +192,7 @@ export const OptionChainTable: React.FC<OptionChainTableProps> = ({
               onChange={(e) => handleExpiryChange(e.target.value)}
               className="bg-slate-100 dark:bg-[#151A26] border border-slate-200 dark:border-[#202738] text-slate-900 dark:text-white rounded-lg px-2.5 py-1 text-xs font-medium focus:outline-none focus:border-emerald-500 cursor-pointer pr-7 appearance-none"
             >
-              {data.expiryDates.map((exp) => (
+              {data.expiryDates.filter(exp => !isExpiredOnPastDay(exp)).map((exp) => (
                 <option key={exp} value={exp}>
                   Expiry: {exp}
                 </option>
